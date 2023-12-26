@@ -1,0 +1,10 @@
+conda remove --name audiolm --all
+conda create --name audiolm
+conda activate audiolm
+conda install python==3.9.2
+pip install 'accelerate>=0.24.0' 'beartype>=0.16.1' 'einops>=0.7.0' 'ema-pytorch>=0.2.2' encodec fairseq 'gateloop-transformer>=0.0.24' joblib 'local-attention>=1.9.0' scikit-learn sentencepiece 'torch>=1.12' torchaudio transformers tqdm 'vector-quantize-pytorch>=1.11.3'
+
+export LD_LIBRARY_PATH='/home/chris/miniconda3/envs/audiolm/lib/python3.9/site-packages/nvidia/cudnn/lib/;/home/chris/miniconda3/envs/audiolm/lib/python3.9/site-packages/nvidia/nvjitlink/lib/'
+
+# https://medium.com/analytics-vidhya/understanding-the-mel-spectrogram-fca2afa2ce53
+

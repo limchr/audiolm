@@ -17,6 +17,9 @@ from audiolm_pytorch.utils import curtail_to_multiple
 
 from einops import rearrange, reduce
 
+from audiolm_pytorch import EncodecWrapper
+
+
 # helper functions
 
 def exists(val):
@@ -29,6 +32,85 @@ def is_unique(arr):
     return len(set(arr)) == len(arr)
 
 # dataset functions
+
+
+
+
+class EncodecSoundDataset(Dataset):
+    @beartype
+    def __init__(
+        self,
+        folder,
+        target_sample_hz = 24000,  # target sample hz must be specified, or a tuple of them if one wants to return multiple resampled
+        exts = ['flac', 'wav', 'mp3', 'webm'],
+        fixed_length = 2,
+        device = 'cuda'
+    ):
+        super().__init__()
+        path = Path(folder)
+        assert path.exists(), f'folder "{str(path)}" does not exist'
+
+        files = [file for ext in exts for file in path.glob(f'**/*.{ext}')]
+        assert len(files) > 0, 'no sound files found'
+
+        self.files = files
+
+        self.fixed_length = fixed_length * target_sample_hz
+        self.target_sample_hz = target_sample_hz
+        self.device = device
+
+        self.encodec = EncodecWrapper()
+        self.encodec.to(device=device)
+
+        self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood']
+
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        file = self.files[idx]
+
+        filename = file.__str__()[file.__str__().rfind('/')+1:]
+        class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
+
+        if not class_vec.any(): print('couldnt find class for name: '+filename)
+
+        data, sample_hz = torchaudio.load(file)
+
+        assert data.numel() > 0, f'one of your audio file ({file}) is empty. please remove it from your folder'
+
+        if data.shape[0] > 1:
+            # the audio has more than 1 channel, convert to mono
+            data = reduce(data, 'c ... -> 1 ...', 'mean')
+
+        # first resample data to the max target freq
+
+        data = resample(data, sample_hz, self.target_sample_hz)
+
+        audio_length = data.size(1)
+
+        if audio_length > self.fixed_length:
+            data = data[:, 0:self.fixed_length]
+        else:
+            data2 = torch.zeros((1,self.fixed_length),dtype=torch.float32)
+            data2[0,:data.shape[1]] = data
+            data = data2
+
+        data = rearrange(data, '1 ... -> ...')
+        
+        data = data.to(self.device)
+
+        codes, indices, _ = self.encodec.forward(data, 24000, True)
+
+        # shift data for target array construction
+        x, y = codes[:-1], codes[1:]
+        x, y = x.to(device=self.device), y.to(device=self.device)
+
+        return x, y, class_vec
+
+
+
 
 class SoundDataset(Dataset):
     @beartype
