@@ -3,64 +3,190 @@ import torch.nn.functional as F
 import torchaudio
 
 import audiolm_pytorch.data as data
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
+from dataclasses import dataclass
 
 import audiolm_pytorch.gpt as gpt
 
 from audiolm_pytorch import EncodecWrapper
 
+import random
+import numpy as np
 
+import matplotlib.pyplot as plt
+import matplotlib
 
 device = 'cuda'
+from_scratch = True
 
-num_passes = 20 # num passes through the dataset
+num_passes = 2000 # num passes through the dataset
 
-learning_rate = 6e-4 # max learning rate
+start_iter = 0
+learning_rate = 10e-4 # max learning rate
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
+batch_size = 32
+
+seed = 1234
+
+
+# do not change
+best_val_loss = 1e9
+
+
+
+torch.manual_seed(seed)
+random.seed(seed)
+np.random.seed(seed)
+
+@dataclass
+class AudioConfig:
+    block_size: int = 150
+    vocab_size: int = 128
+    n_layer: int = 6
+    n_head: int = 6
+    n_embd: int = 240
+    dropout: float = 0.2
+    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+config = AudioConfig()
+model_args = dict(n_layer=config.n_layer, n_head=config.n_head, n_embd=config.n_embd, block_size=config.block_size,
+                bias=config.bias, vocab_size=config.vocab_size, dropout=config.dropout) # start with model_args from command line
+
+
+def load_model(ckpt_path):
+    checkpoint = torch.load(ckpt_path, map_location=device)
+    checkpoint_model_args = checkpoint['model_args']
+    # force these config attributes to be equal otherwise we can't even resume training
+    # the rest of the attributes (e.g. dropout) can stay as desired from command line
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+        model_args[k] = checkpoint_model_args[k]
+    # create the model
+    gptconf = AudioConfig(**model_args)
+    model = gpt.GPT(gptconf,checkpoint['conditions'])
+    state_dict = checkpoint['model']
+    # fix the keys of the state dictionary :(
+    # honestly no idea how checkpoints sometimes get this prefix, have to debug more
+    unwanted_prefix = '_orig_mod.'
+    for k,v in list(state_dict.items()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    return model, checkpoint
+
+
+def save_model(checkpoint_path, model,optimizer,model_args,i,best_val_loss,config,sound_classes):
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'model_args': model_args,
+        'iter_num': i+1,
+        'best_val_loss': best_val_loss,
+        'config': config,
+        'conditions': sound_classes
+    }
+    print(f"saving checkpoint to results/ckpt.pt with val loss {best_val_loss}")
+    torch.save(checkpoint, checkpoint_path)
 
 
 
 
-
-# ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_min')
-
-ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted')
-dl = DataLoader(ds, batch_size=4, shuffle=True)
-
-config = gpt.AudioConfig()
-model = gpt.GPT(config)
-model.to(device)
-
-optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
+if __name__ == '__main__':
 
 
+    # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_min')
+
+    ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
+    dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', True)
+
+    # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/rarefaction_poke_in_the_ear_with_a_sharp_stick', seed=seed)
+    # dsb = data.BufferedDataset(ds, '/home/chris/data/poke.pkl', False)
+
+
+    import math
+    train_size = math.floor(0.9 * len(dsb))
+    val_size = math.floor(0.1 * len(dsb))
+    test_size = len(dsb) - train_size - val_size
+
+    ds_train, ds_test, ds_val = random_split(dsb, [train_size, test_size, val_size])
+    dl = DataLoader(ds_train, batch_size=batch_size, shuffle=True)
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True)
 
 
 
-for i in range(num_passes):
-    for dx, dy, sample_class in dl:
-        logits, loss = model.forward(dx,dy)
-        loss.backward()
-        print(loss)
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
 
-gx = torch.zeros((1,1,128)).to(device)
-gx[:,:,:] = dx[0,0,:]
-
-num_generate = 148
-
-for i in range(num_generate):
-    ng = model.forward(gx)[0]
-    gx = torch.cat((gx, ng), dim=1)
+    # training from scratch
+    if from_scratch:
+        model = gpt.GPT(config, ds.sound_classes)
+        model.to(device)
+    # training from checkpoint
+    else: 
+        print(f"Resuming training from checkpoint")
+        # resume training from a checkpoint.
+        ckpt_path = 'results/ckpt.pt'
+        model, checkpoint = load_model(ckpt_path)
+        start_iter = checkpoint['iter_num']
+        best_val_loss = checkpoint['best_val_loss']
 
 
-encodec = EncodecWrapper()
-encodec.to(device=device)
-wav = encodec.decode(gx)
-torchaudio.save('generated.wav', wav.to('cpu').reshape(1,-1), 24000)
+    optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
 
+
+    @torch.no_grad()
+    def det_loss_testing(dl, model):
+        model.eval()
+        losses = []
+        for dx, dy, sample_class in dl:
+            _, loss = model.forward(dx,dy, sample_class)
+            losses.append(loss.cpu().detach().item())    
+        model.train()
+        return np.mean(losses)
+
+    train_losses = []
+    val_losses = []
+    change_learning_rate = learning_rate
+    actual_learning_rate = learning_rate
+
+
+    model.train()
+    for i in range(start_iter,num_passes):
+        for dx, dy, sample_class in dl:
+            logits, loss = model.forward(dx,dy, sample_class)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
         
-pass
+        # if i%2 == 0 and i != 0:
+        #     learning_rate = learning_rate * 5
+        #     print('changed learning rate to %.3e at pass %d' % (learning_rate, i))
+        #     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
+        
+        if i > int(num_passes*0.9):
+            change_learning_rate = learning_rate * 0.2 * 0.2
+        elif i > int(num_passes*0.8):
+            change_learning_rate = learning_rate * 0.2
+        if change_learning_rate != actual_learning_rate:   
+            print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
+            optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=change_learning_rate,betas=(beta1, beta2),device_type=device)
+            actual_learning_rate = change_learning_rate
+        
+        
+        train_loss = det_loss_testing(dl, model)
+        val_loss = det_loss_testing(dl_val, model)
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        print('ds pass: %d\ttrain loss: %.3f\tval loss: %.3f' % (i, train_loss, val_loss))
+
+        if i > 0 and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.sound_classes)
+            
+    # save losses plot
+    plt.figure()
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='val')
+    plt.legend()
+    plt.savefig('results/losses.png')
+    plt.show()
+

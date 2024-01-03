@@ -34,6 +34,8 @@ def is_unique(arr):
 # dataset functions
 
 
+import random
+import pickle as pkl
 
 
 class EncodecSoundDataset(Dataset):
@@ -41,16 +43,17 @@ class EncodecSoundDataset(Dataset):
     def __init__(
         self,
         folder,
-        target_sample_hz = 24000,  # target sample hz must be specified, or a tuple of them if one wants to return multiple resampled
+        target_sample_hz = 24000,
         exts = ['flac', 'wav', 'mp3', 'webm'],
         fixed_length = 2,
-        device = 'cuda'
+        device = 'cuda',
+        seed = 1234
     ):
         super().__init__()
         path = Path(folder)
         assert path.exists(), f'folder "{str(path)}" does not exist'
-
-        files = [file for ext in exts for file in path.glob(f'**/*.{ext}')]
+        files = sorted([str(file) for ext in exts for file in path.glob(f'**/*.{ext}')])
+        random.Random(seed).shuffle(files)
         assert len(files) > 0, 'no sound files found'
 
         self.files = files
@@ -62,7 +65,7 @@ class EncodecSoundDataset(Dataset):
         self.encodec = EncodecWrapper()
         self.encodec.to(device=device)
 
-        self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood']
+        self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood', 'synth', 'clav', 'cow', 'bassdrum', 'ride', 'drum', 'bass', 'snap']
 
 
     def __len__(self):
@@ -70,12 +73,22 @@ class EncodecSoundDataset(Dataset):
 
     def __getitem__(self, idx):
         file = self.files[idx]
-
         filename = file.__str__()[file.__str__().rfind('/')+1:]
+        
+        # define class vector
         class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
+        class_vec = class_vec.to(device=self.device)
+        # if not class_vec.any(): print('couldnt find class for name: '+filename)
 
-        if not class_vec.any(): print('couldnt find class for name: '+filename)
+        # load audio from file and encode it
+        wav_data = self.load_audio(file)
+        x, y = self.encode_sample(wav_data)
 
+
+
+        return x, y, class_vec
+    
+    def load_audio(self, file):
         data, sample_hz = torchaudio.load(file)
 
         assert data.numel() > 0, f'one of your audio file ({file}) is empty. please remove it from your folder'
@@ -97,19 +110,61 @@ class EncodecSoundDataset(Dataset):
             data2[0,:data.shape[1]] = data
             data = data2
 
+        # todo: what is this for? Important for saving the audiofile back later?
         data = rearrange(data, '1 ... -> ...')
         
         data = data.to(self.device)
+        
+        return data
 
-        codes, indices, _ = self.encodec.forward(data, 24000, True)
+    
+    def encode_sample(self,wav_data):
+        codes, indices, _ = self.encodec.forward(wav_data, 24000, True)
 
         # shift data for target array construction
-        x, y = codes[:-1], codes[1:]
+        # x = 0 1 2 3 4
+        # y = 1 2 3 4
+
+        x, y = codes[:-1], codes
         x, y = x.to(device=self.device), y.to(device=self.device)
+        x = torch.cat((torch.zeros((1,128)).to(self.device),x),dim=0)
+        # y = torch.cat((torch.zeros((1,128)).to(self.device),y),dim=0)
+        return x, y
 
-        return x, y, class_vec
+    def decode_sample(self, codes):
+        codes = codes[:,1:,:] # remove first zero vector
+        wav = self.encodec.decode(codes)
+        return wav
+    
+    def save_audio(self, wav, filename):
+        torchaudio.save(filename, wav.to('cpu').reshape(1,-1), 24000)
 
 
+class BufferedDataset(Dataset):
+    def __init__(self, dataset, dump_path, dump_ds = False):
+        self.dataset = dataset
+        self.dump_path = dump_path
+        if dump_ds:
+            self.dump_ds()
+        else:
+            self.load_ds()
+    def dump_ds(self):
+        ds = []
+        for d in self.dataset:
+            ds.append(d)
+        self.ds = ds
+        with open(self.dump_path, 'wb') as f:
+            pkl.dump(self.ds, f)
+        print('dumping dataset to '+self.dump_path+' done')
+    def load_ds(self):
+        with open(self.dump_path, 'rb') as f:
+            self.ds = pkl.load(f)
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, idx):
+        return self.ds[idx]
 
 
 class SoundDataset(Dataset):

@@ -7,4 +7,3 @@ pip install 'accelerate>=0.24.0' 'beartype>=0.16.1' 'einops>=0.7.0' 'ema-pytorch
 export LD_LIBRARY_PATH='/home/chris/miniconda3/envs/audiolm/lib/python3.9/site-packages/nvidia/cudnn/lib/;/home/chris/miniconda3/envs/audiolm/lib/python3.9/site-packages/nvidia/nvjitlink/lib/'
 
 # https://medium.com/analytics-vidhya/understanding-the-mel-spectrogram-fca2afa2ce53
-

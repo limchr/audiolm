@@ -115,20 +115,11 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
-@dataclass
-class AudioConfig:
-    block_size: int = 149
-    vocab_size: int = 128
-    n_layer: int = 12
-    n_head: int = 8
-    n_embd: int = 128
-    dropout: float = 0.0
-    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 
 class GPT(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, condition):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -140,13 +131,16 @@ class GPT(nn.Module):
             drop = nn.Dropout(self.config.dropout),
             h = nn.ModuleList([Block(self.config) for _ in range(self.config.n_layer)]),
             ln_f = LayerNorm(self.config.n_embd, bias=self.config.bias),
+            
+            # own additions
+            class_cond_layer = nn.Sequential(nn.Linear(len(condition), 2), nn.Linear(2, config.n_embd)),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -178,12 +172,23 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, tok_emb, targets=None):
-        pos = torch.arange(0, tok_emb.shape[1], dtype=torch.long, device=tok_emb.device) # shape (t)
+
+    def forward(self, tok_emb, targets=None, data_classes=None):
+        cond = self.transformer.class_cond_layer(data_classes) # (b, n_embd)
+        cond = cond.view(cond.shape[0], 1, cond.shape[1]) # (b, 1, n_embd)
+        # tok_emb = torch.cat((tok_emb,cond), dim=1)
+        # if not targets is None:
+        #     targets = torch.cat((targets,cond), dim=1)
+        
+        b, t, f = tok_emb.size()
+        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+
+        tok_emb = self.transformer.wte(tok_emb)
 
         # forward the GPT model itself
+        pos = torch.arange(0, t, dtype=torch.long, device=tok_emb.device) # shape (t)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.drop(tok_emb + pos_emb + cond)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
