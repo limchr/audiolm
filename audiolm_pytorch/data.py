@@ -102,7 +102,9 @@ class EncodecSoundDataset(Dataset):
         data = resample(data, sample_hz, self.target_sample_hz)
 
         audio_length = data.size(1)
-
+        
+        # unifying the length of samples by cropping too long samples
+        # of by filling too short samples with zeros
         if audio_length > self.fixed_length:
             data = data[:, 0:self.fixed_length]
         else:
@@ -111,7 +113,7 @@ class EncodecSoundDataset(Dataset):
             data = data2
 
         # todo: what is this for? Important for saving the audiofile back later?
-        data = rearrange(data, '1 ... -> ...')
+        data = data.squeeze() # squeeze first dimension with size 1
         
         data = data.to(self.device)
         
@@ -120,6 +122,8 @@ class EncodecSoundDataset(Dataset):
     
     def encode_sample(self,wav_data):
         codes, indices, _ = self.encodec.forward(wav_data, 24000, True)
+
+        codes = codes * 0.2
 
         # shift data for target array construction
         # x = 0 1 2 3 4
@@ -132,6 +136,8 @@ class EncodecSoundDataset(Dataset):
         return x, y
 
     def decode_sample(self, codes):
+        codes = codes * 5
+
         codes = codes[:,1:,:] # remove first zero vector
         wav = self.encodec.decode(codes)
         return wav

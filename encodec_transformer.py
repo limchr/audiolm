@@ -17,12 +17,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 device = 'cuda'
-from_scratch = True
+from_scratch = True # train model from scratch, otherwise load from checkpoint
+ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 2000 # num passes through the dataset
+num_passes = 160 # num passes through the dataset
 
 start_iter = 0
-learning_rate = 10e-4 # max learning rate
+learning_rate = 4e-4 # max learning rate
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -93,15 +94,13 @@ def save_model(checkpoint_path, model,optimizer,model_args,i,best_val_loss,confi
 
 
 if __name__ == '__main__':
-
-
     # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_min')
 
     ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
-    dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', True)
+    dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', ds_from_scratch)
 
     # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/rarefaction_poke_in_the_ear_with_a_sharp_stick', seed=seed)
-    # dsb = data.BufferedDataset(ds, '/home/chris/data/poke.pkl', False)
+    # dsb = data.BufferedDataset(ds, '/home/chris/data/poke.pkl', ds_from_scratch)
 
 
     import math
@@ -156,6 +155,7 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+            # if i % 100 == 0: print(loss.item()) # print more losses for debugging
         
         # if i%2 == 0 and i != 0:
         #     learning_rate = learning_rate * 5
@@ -176,7 +176,7 @@ if __name__ == '__main__':
         val_loss = det_loss_testing(dl_val, model)
         train_losses.append(train_loss)
         val_losses.append(val_loss)
-        print('ds pass: %d\ttrain loss: %.3f\tval loss: %.3f' % (i, train_loss, val_loss))
+        print('ds pass: %d\ttrain loss: %.5f\tval loss: %.5f' % (i, train_loss, val_loss))
 
         if i > 0 and val_loss < best_val_loss:
             best_val_loss = val_loss
