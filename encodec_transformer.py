@@ -44,6 +44,7 @@ np.random.seed(seed)
 @dataclass
 class AudioConfig:
     block_size: int = 150
+    block_size_condition: int = 26
     vocab_size: int = 128
     n_layer: int = 6
     n_head: int = 6
@@ -64,7 +65,7 @@ def load_model(ckpt_path):
         model_args[k] = checkpoint_model_args[k]
     # create the model
     gptconf = AudioConfig(**model_args)
-    model = gpt.GPT(gptconf,checkpoint['conditions'])
+    model = gpt.ConditionedGPT(gptconf)
     state_dict = checkpoint['model']
     # fix the keys of the state dictionary :(
     # honestly no idea how checkpoints sometimes get this prefix, have to debug more
@@ -117,7 +118,7 @@ if __name__ == '__main__':
 
     # training from scratch
     if from_scratch:
-        model = gpt.GPT(config, ds.sound_classes)
+        model = gpt.ConditionedGPT(config)
         model.to(device)
     # training from checkpoint
     else: 

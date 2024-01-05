@@ -31,7 +31,7 @@ conds = checkpoint['conditions']
 
 config = model.config
 
-ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/rarefaction_poke_in_the_ear_with_a_sharp_stick', seed=seed)
+ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
 
 # generate samples
 model.eval()
@@ -44,8 +44,8 @@ for clsi, cls in enumerate(conds):
     sample_class = torch.zeros((1,conds.__len__())).to(device=device)
     sample_class[0,clsi] = 1.0
 
-    emb_sample_class = model.transformer.class_cond_layer[0](sample_class)
-    emb_sample_classes.append(emb_sample_class)
+    # emb_sample_class = model.transformer.class_cond_layer[0](sample_class)
+    # emb_sample_classes.append(emb_sample_class)
 
 
     for i in range(num_generate):
@@ -54,25 +54,25 @@ for clsi, cls in enumerate(conds):
 
     wav = ds.decode_sample(gx)
     ds.save_audio(wav, f'results/generate_{cls}.wav')
-d = torch.cat(emb_sample_classes).to('cpu').detach().numpy()
 
 
 
+# d = torch.cat(emb_sample_classes).to('cpu').detach().numpy()
 
-# plot condition bottleneck
-fig, ax = plt.subplots()
-cmap = matplotlib.cm.get_cmap('Spectral')
+# # plot condition bottleneck
+# fig, ax = plt.subplots()
+# cmap = matplotlib.cm.get_cmap('Spectral')
 
-for i in range(len(conds)):
-    ax.scatter(d[i,0],d[i,1], c=cmap(i/20.), cmap='tab20', label=conds[i])
-    ax.annotate(conds[i], (d[i,0],d[i,1]))
-plt.legend()
-plt.savefig('results/condition_bottleneck.png')
-plt.show()
+# for i in range(len(conds)):
+#     ax.scatter(d[i,0],d[i,1], c=cmap(i/20.), cmap='tab20', label=conds[i])
+#     ax.annotate(conds[i], (d[i,0],d[i,1]))
+# plt.legend()
+# plt.savefig('results/condition_bottleneck.png')
+# plt.show()
 
 
-# plot attention weights
-plt.figure()
-plt.imshow(model.transformer.h[0].attn.c_attn.weight.cpu().detach().numpy())
-plt.savefig('results/att_layer.png')
-plt.show()
+# # plot attention weights
+# plt.figure()
+# plt.imshow(model.transformer.h[0].attn.c_attn.weight.cpu().detach().numpy())
+# plt.savefig('results/att_layer.png')
+# plt.show()
