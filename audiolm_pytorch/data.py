@@ -65,7 +65,17 @@ class EncodecSoundDataset(Dataset):
         self.encodec = EncodecWrapper()
         self.encodec.to(device=device)
 
-        self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood', 'synth', 'clav', 'cow', 'bassdrum', 'ride', 'drum', 'bass', 'snap']
+        # self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood', 'synth', 'clav', 'cow', 'bassdrum', 'ride', 'drum', 'bass', 'snap']
+
+        self.class_groups = {
+            'tom': ['tom', 'conga', 'bongo'],
+            'kick': ['kick', 'bass', 'bassdrum', 'bd', 'bdrum'],
+            'snare': ['snare', 'rim', 'snap'],
+            'hihat': ['hihat', 'hh', 'cow', 'tamb', 'wood', 'ride', 'crash', 'cymb', 'bell'],
+            'clap': ['clap'],
+        }
+        self.classes = list(self.class_groups.keys())
+
 
 
     def __len__(self):
@@ -76,7 +86,12 @@ class EncodecSoundDataset(Dataset):
         filename = file.__str__()[file.__str__().rfind('/')+1:]
         
         # define class vector
-        class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
+        class_vec = torch.zeros(len(self.class_groups.keys()))
+        for i, (key, value) in enumerate(self.class_groups.items()):
+            in_group = [1.0 if name in filename.lower() else 0.0 for name in value]
+            class_vec[i] = 1.0 if sum(in_group)>=1 else 0.0
+            
+        # class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
         class_vec = class_vec.to(device=self.device)
         # if not class_vec.any(): print('couldnt find class for name: '+filename)
 
@@ -123,7 +138,7 @@ class EncodecSoundDataset(Dataset):
     def encode_sample(self,wav_data):
         codes, indices, _ = self.encodec.forward(wav_data, 24000, True)
 
-        codes = codes * 0.2
+        # codes = codes * 0.2
 
         # shift data for target array construction
         # x = 0 1 2 3 4
@@ -136,7 +151,7 @@ class EncodecSoundDataset(Dataset):
         return x, y
 
     def decode_sample(self, codes):
-        codes = codes * 5
+        # codes = codes * 5
 
         codes = codes[:,1:,:] # remove first zero vector
         wav = self.encodec.decode(codes)

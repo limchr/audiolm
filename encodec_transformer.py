@@ -20,7 +20,7 @@ device = 'cuda'
 from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 160 # num passes through the dataset
+num_passes = 1000 # num passes through the dataset
 
 start_iter = 0
 learning_rate = 4e-4 # max learning rate
@@ -44,7 +44,7 @@ np.random.seed(seed)
 @dataclass
 class AudioConfig:
     block_size: int = 150
-    block_size_condition: int = 26
+    block_size_condition: int = 5 + 2
     vocab_size: int = 128
     n_layer: int = 6
     n_head: int = 6
@@ -52,8 +52,7 @@ class AudioConfig:
     dropout: float = 0.2
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 config = AudioConfig()
-model_args = dict(n_layer=config.n_layer, n_head=config.n_head, n_embd=config.n_embd, block_size=config.block_size,
-                bias=config.bias, vocab_size=config.vocab_size, dropout=config.dropout) # start with model_args from command line
+model_args = dict(n_layer=config.n_layer, n_head=config.n_head, n_embd=config.n_embd, block_size=config.block_size, bias=config.bias, vocab_size=config.vocab_size, dropout=config.dropout) # start with model_args from command line
 
 
 def load_model(ckpt_path):
@@ -181,7 +180,7 @@ if __name__ == '__main__':
 
         if i > 0 and val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.sound_classes)
+            save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.classes)
             
     # save losses plot
     plt.figure()
