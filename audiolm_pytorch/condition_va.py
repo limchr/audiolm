@@ -13,84 +13,94 @@ torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
 
-
+# vgl https://github.com/Jackson-Kang/Pytorch-VAE-tutorial/blob/master/01_Variational_AutoEncoder.ipynb
 
 class ConditionEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_dim, latent_dim, layers):
         super(ConditionEncoder, self).__init__()
-        # Convolutional layers
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=5, stride=2, padding=2)
-        self.conv2 = nn.Conv2d(32, 16, kernel_size=3, stride=2, padding=1)
-        self.conv3 = nn.Conv2d(16, 8, kernel_size=3, stride=2, padding=1)
-        # self.conv4 = nn.Conv2d(8, 4, kernel_size=3, stride=1, padding=1)
-
         # Fully connected layers
-        self.fc1 = nn.Linear(16*16*8, 512)
-        self.fc2 = nn.Linear(512, 128)
-        self.fc3 = nn.Linear(128, 32)
-        self.fc4 = nn.Linear(32, 2)
+        
+        layers = [3840] + layers + [hidden_dim]
+        self.layers = layers
+        for i in range(len(layers)-1):
+            setattr(self, 'fc{}'.format(i+1), nn.Linear(layers[i], layers[i+1]))
+            setattr(self, 'bn{}'.format(i+1), nn.LayerNorm(layers[i+1]))
+        
+        
+        self.mean = nn.Linear(hidden_dim, latent_dim)
+        self.var = nn.Linear(hidden_dim, latent_dim)
+
+        self.relu = torch.nn.LeakyReLU(0.2)
+        self.dropout = nn.Dropout(0.2)
+
 
     def forward(self, x):
-        x = x.view([x.shape[0], 1, x.shape[1], x.shape[2]] )
-        # Convolutional layers with ReLU activation and max pooling
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = torch.relu(self.conv3(x))
-        # x = self.pool(torch.relu(self.conv4(x)))
-        # Flatten the output for the fully connected layers
-        x = x.view(-1, 16*16*8)
-        # Fully connected layers with ReLU activation
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.tanh(self.fc4(x))
-        return x
+        x = x.view([x.shape[0], -1] )
+        
+        for i in range(1,len(self.layers)):
+            x = getattr(self, 'fc{}'.format(i))(x)
+            x = getattr(self, 'bn{}'.format(i))(x)
+            x = self.relu(x)
+            x = self.dropout(x)
+        
+
+        mean = self.mean(x)
+        var = self.var(x)
+       
+        return mean, var
 
 class ConditionDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_dim, latent_dim, layers):
         super(ConditionDecoder, self).__init__()
         
+        layers = [latent_dim, hidden_dim] + layers[::-1] + [3840]
+        self.layers = layers
+        
         # Fully connected layers
-        self.fc1 = nn.Linear(2, 32)
-        self.fc2 = nn.Linear(32, 128)
-        self.fc3 = nn.Linear(128, 512)
-        self.fc4 = nn.Linear(512, 16*16*8)
+        for i in range(len(layers)-1):
+            setattr(self, 'fc{}'.format(i+1), nn.Linear(layers[i], layers[i+1]))
+            setattr(self, 'bn{}'.format(i+1), nn.LayerNorm(layers[i+1]))
 
-        
-        # Deconvolutional layers
-        
-        
-        self.deconv1 = nn.ConvTranspose2d(8, 16, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.deconv2 = nn.ConvTranspose2d(16, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.deconv3 = nn.ConvTranspose2d(32, 1, kernel_size=5, stride=2, padding=2, output_padding=1)
-        # self.conv4 = nn.Conv2d(8, 4, kernel_size=3, stride=1, padding=1)
+        self.relu = torch.nn.LeakyReLU(0.2)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
 
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.relu(self.fc4(x))
-        
+        for i in range(1,len(self.layers)-1):
+            x = getattr(self, 'fc{}'.format(i))(x)
+            x = getattr(self, 'bn{}'.format(i))(x)
+            x = self.relu(x)
+            x = self.dropout(x)
 
-        x = x.view([x.shape[0], 8, 16, 16])
-
-        # Convolutional layers with ReLU activation and max pooling
-        x = torch.relu(self.deconv1(x))
-        x = torch.relu(self.deconv2(x))
-        x = torch.tanh(self.deconv3(x))
+        x = getattr(self, 'fc{}'.format(len(self.layers)-1))(x)
+        x = x.view([x.shape[0], 30, 128])
 
         return x
 
 class ConditionVA(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_dim, latent_dim, layers):
         super(ConditionVA, self).__init__()
-        self.encoder = ConditionEncoder()
-        self.decoder = ConditionDecoder()
+
         
+
+        self.encoder = ConditionEncoder(hidden_dim, latent_dim, layers)
+        self.decoder = ConditionDecoder(hidden_dim, latent_dim, layers)
+        self.initialize_weights()
+        
+
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+
+        mean, var = self.encoder(x)
+
+        epsilon = torch.randn_like(var).to(device)        # sampling epsilon        
+        z = mean + torch.exp(var / 2) * epsilon                         # reparameterization trick
+
+        x_hat = self.decoder(z)
+        return x_hat, mean, var
 
 
+    def initialize_weights(self):
+        for layer in list(self.encoder.children()) + list(self.decoder.children()):
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_normal_(layer.weight, gain=0.2)
+                nn.init.constant_(layer.bias, 0)  # Initialize biases to zero or another suitable value
