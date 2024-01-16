@@ -19,40 +19,44 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 
+seed = 1234
+torch.manual_seed(seed)
+random.seed(seed)
+np.random.seed(seed)
+
+
 # things to look at:
 
+# other regulation, model complexities
 # conditioning z to be between -1 and 1 (penelizing large vectors as second optimization term)
+# model exporting
+# try convolutional layers for pre stage
 # model importing for transformer
 
 
 
 device = 'cuda'
-seed = 1234
 batch_size = 256
-num_passes = 3000
+num_passes = 2500
 
-lr = 10e-4 # learning rate
-wd = 0.01 # weight decay
+lr = 12e-4 # learning rate
+wd = 0.1 # weight decay
 betas = (0.9, 0.95) # adam betas
 
 loss_fn = nn.CrossEntropyLoss()
 
-dr2d = 0.6 # dropout rate # best 0.7
-dr = 0.3 # dropout rate # best 0.7
+dr = 0.7 # dropout rate
 
 
-pre_layers = [1024, 64]
+pre_layers = [32*128, 8*128, 2*128, 64]
 post_layers = [2, 5]
 
-torch.manual_seed(seed)
-random.seed(seed)
-np.random.seed(seed)
 
 # 
 # model initialization
 # 
 
-cnn = ConditionCNN(pre_layers=pre_layers,post_layers=post_layers, dropout1d_rate=dr, dropout2d_rate=dr2d).to(device)
+cnn = ConditionCNN(pre_layers=pre_layers,post_layers=post_layers, dropout_rate=dr).to(device)
 
 #
 # utility functions
@@ -72,7 +76,7 @@ def det_loss(cnn,dl):
     cnn.eval()
     for d in dl:
         x = d[0]
-        x = x[:,:32,:]
+        x = x[:,:32:]
         x_hat = cnn.forward(x)
         loss = loss_fn(x_hat, d[2])
         losses.append(loss.item())
@@ -95,8 +99,8 @@ def print_param_stats(model):
 
 ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
 dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', False)
-train_size = math.floor(0.9 * len(dsb))
-val_size = math.floor(0.1 * len(dsb))
+train_size = math.floor(0.7 * len(dsb))
+val_size = math.floor(0.3 * len(dsb))
 test_size = len(dsb) - train_size - val_size
 
 ds_train, ds_test, ds_val = random_split(dsb, [train_size, test_size, val_size])
