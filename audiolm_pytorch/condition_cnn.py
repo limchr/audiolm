@@ -65,8 +65,10 @@ class ConditionCNN(nn.Module):
             x = self.relu(x)
             # x = self.dropout(x)
         
+        # out = nn.functional.softmax(self.out(x)) # not good for visualization of bottleneck layer
         out = self.out(x)
-       
+
+
         return out, bn
 
     def initialize_weights(self):

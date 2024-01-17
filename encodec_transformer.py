@@ -18,7 +18,7 @@ import matplotlib
 
 device = 'cuda'
 from_scratch = True # train model from scratch, otherwise load from checkpoint
-ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
+ds_from_scratch = True # create data set dump from scratch (set True if data set or pre processing has changed)
 
 num_passes = 1000 # num passes through the dataset
 
@@ -44,7 +44,7 @@ np.random.seed(seed)
 @dataclass
 class AudioConfig:
     block_size: int = 150
-    block_size_condition: int = 5 + 2
+    block_size_condition: int = 2
     vocab_size: int = 128
     n_layer: int = 6
     n_head: int = 6
@@ -131,13 +131,15 @@ if __name__ == '__main__':
 
     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
 
+    condition_cnn = torch.load('results/cnn_model.pt')
 
     @torch.no_grad()
     def det_loss_testing(dl, model):
         model.eval()
         losses = []
         for dx, dy, sample_class in dl:
-            _, loss = model.forward(dx,dy, sample_class)
+            condition_bottleneck = condition_cnn(dx[:,:32,:],True)
+            _, loss = model.forward(dx,dy, condition_bottleneck)
             losses.append(loss.cpu().detach().item())    
         model.train()
         return np.mean(losses)
@@ -151,7 +153,8 @@ if __name__ == '__main__':
     model.train()
     for i in range(start_iter,num_passes):
         for dx, dy, sample_class in dl:
-            logits, loss = model.forward(dx,dy, sample_class)
+            condition_bottleneck = condition_cnn(dx[:,:32,:],True)
+            logits, loss = model.forward(dx,dy, condition_bottleneck)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)

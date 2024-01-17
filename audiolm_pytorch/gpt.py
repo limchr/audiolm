@@ -228,16 +228,18 @@ class ConditionedGPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Linear(self.config.vocab_size, self.config.n_embd),
             wpe = nn.Embedding(self.config.block_size, self.config.n_embd),
-            cpe = nn.Embedding(self.config.block_size_condition, self.config.n_embd),
             drop = nn.Dropout(self.config.dropout),
             dropc = nn.Dropout(self.config.dropout),
             he = nn.ModuleList([EncoderBlock(self.config) for _ in range(self.config.n_layer)]),
             hd = nn.ModuleList([DecoderBlock(self.config) for _ in range(self.config.n_layer)]),
             ln_f = LayerNorm(self.config.n_embd, bias=self.config.bias),
 
-            # own additions
-            cond_bn = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, config.n_embd)),
-            cond_bn2 = ConditionCNN(),
+            # condition
+            cte = nn.Linear(1, config.n_embd),
+            cpe = nn.Embedding(self.config.block_size_condition, self.config.n_embd),
+
+            # cond_bn = nn.Sequential(nn.Linear(1, 2), nn.Linear(2, config.n_embd)),
+            # cond_bn2 = ConditionCNN(),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
@@ -281,28 +283,26 @@ class ConditionedGPT(nn.Module):
         b, t, f = tok_emb.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
 
-        condition[:] = 0.0
-        cond2 = self.transformer.cond_bn2(tok_emb)
-
-        combined_condition = torch.cat((condition,cond2),dim=1)
-
-        combined_condition = combined_condition.reshape(combined_condition.shape + (1,))
-        cond_emb = self.transformer.cond_bn(combined_condition) # (b, n_embd)
+        # condition[:] = 0.0
+        # cond2 = self.transformer.cond_bn2(tok_emb)
+        # combined_condition = torch.cat((condition,cond2),dim=1)
+        # combined_condition = combined_condition.reshape(combined_condition.shape + (1,))
+        # cond_emb = self.transformer.cond_bn(combined_condition) # (b, n_embd)
 
 
         tok_emb = self.transformer.wte(tok_emb)
-
-        # forward the GPT model itself
         pos = torch.arange(0, t, dtype=torch.long, device=tok_emb.device) # shape (t)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         
+        cc = condition.reshape(condition.shape + (1,))
+        condition_emb = self.transformer.cte(cc)
         pos_encoder = torch.arange(0, self.config.block_size_condition, dtype=torch.long, device=tok_emb.device) # shape (t)
         pos_emb_encoder = self.transformer.cpe(pos_encoder) # position embeddings of shape (t, n_embd)
         
         
         
         xd = self.transformer.drop(tok_emb + pos_emb)
-        xe = self.transformer.dropc(cond_emb + pos_emb_encoder) # todo:  + pos_emb_encoder
+        xe = self.transformer.dropc(condition_emb + pos_emb_encoder)
 
 
         for e in self.transformer.he:
