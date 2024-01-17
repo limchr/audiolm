@@ -1,3 +1,10 @@
+# https://drive.google.com/drive/folders/1sRuG9mRKo8T-8dUi4MBekXJNikqoJ_l3
+# https://www.dropbox.com/s/8eszpl6sa521q1h/Vintage%20Drum%20Samples%2024bit.zip?dl=0&file_subpath=%2FVintage+Drum+Samples+24bit
+# https://mega.nz/folder/IJlyiYoD#8ul1IaMx5f0R3c0pZPjKOg
+# https://mega.nz/folder/EmYBhChT#rDPBupU4AQAyALSq2j3YuA
+
+
+
 url = 'https://samples.kb6.de/downloads_en.php'
 
 import urllib.request

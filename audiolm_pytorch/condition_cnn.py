@@ -49,14 +49,15 @@ class ConditionCNN(nn.Module):
             x = getattr(self, 'fc1{}'.format(i))(x)
             x = getattr(self, 'bn1{}'.format(i))(x)
             x = self.relu(x)
-            if i < len(self.pre_layers)-1:
+            if i < len(self.pre_layers)-0:
                 x = self.dropout(x)
         
 
         x = self.bottleneck(x)
+        bn = x
 
         if bn_only:
-            return x
+            return bn
 
         for i in range(1,len(self.post_layers)-2):
             x = getattr(self, 'fc2{}'.format(i))(x)
@@ -66,7 +67,7 @@ class ConditionCNN(nn.Module):
         
         out = self.out(x)
        
-        return out
+        return out, bn
 
     def initialize_weights(self):
         for layer in list(self.children()):

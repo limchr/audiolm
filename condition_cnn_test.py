@@ -26,29 +26,34 @@ np.random.seed(seed)
 
 
 # things to look at:
-
-# other regulation, model complexities
-# conditioning z to be between -1 and 1 (penelizing large vectors as second optimization term)
-# model exporting
-# try convolutional layers for pre stage
 # model importing for transformer
 
 
 
 device = 'cuda'
 batch_size = 256
-num_passes = 2500
+num_passes = 5000
 
 lr = 12e-4 # learning rate
 wd = 0.1 # weight decay
 betas = (0.9, 0.95) # adam betas
 
-loss_fn = nn.CrossEntropyLoss()
+def loss_fn_bn(z):
+    # https://www.wolframalpha.com/input?i=plot+%28x*0.9%29%5E16+from+x+%3D+%5B-2%2C2%5D+from+y+%3D+%5B-2%2C2%5D
+    l = torch.linalg.vector_norm(z,ord=2,dim=1)
+    loss = (l*0.8)**16
+    return loss.mean()
 
-dr = 0.7 # dropout rate
+loss_fn_classification = nn.CrossEntropyLoss()
+loss_fn_bottleneck_regularization = loss_fn_bn
+
+def loss_fn(x_hat, y, bn):
+    return loss_fn_classification(x_hat, y) + loss_fn_bottleneck_regularization(bn)
+
+dr = 0.70 # dropout rate
 
 
-pre_layers = [32*128, 8*128, 2*128, 64]
+pre_layers = [32*128, 128, 64]
 post_layers = [2, 5]
 
 
@@ -77,8 +82,8 @@ def det_loss(cnn,dl):
     for d in dl:
         x = d[0]
         x = x[:,:32:]
-        x_hat = cnn.forward(x)
-        loss = loss_fn(x_hat, d[2])
+        x_hat,z = cnn.forward(x)
+        loss = loss_fn(x_hat, d[2],z)
         losses.append(loss.item())
     cnn.train()
     losses = np.array(losses).mean()
@@ -158,8 +163,8 @@ for i in range(num_passes):
         sax = d[0]
         # sax[:] = 0.0 # sanity check
         sax = sax[:,:32,:]
-        x_hat = cnn.forward(sax)
-        loss = loss_fn(x_hat, d[2])
+        x_hat, bn = cnn.forward(sax)
+        loss = loss_fn(x_hat, d[2], bn)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
