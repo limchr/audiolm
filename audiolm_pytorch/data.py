@@ -19,6 +19,7 @@ from einops import rearrange, reduce
 
 from audiolm_pytorch import EncodecWrapper
 
+import numpy as np
 
 # helper functions
 
@@ -118,19 +119,30 @@ class EncodecSoundDataset(Dataset):
         class_vec = torch.zeros(len(self.class_groups.keys()))
         for i, (key, value) in enumerate(self.class_groups.items()):
             in_group = [1.0 if name in filename.lower() else 0.0 for name in value]
-            class_vec[i] = 1.0 if sum(in_group)>=1 else 0.0
-            
+            class_vec[i] = 1.0 if sum(in_group)>0.0 else 0.0
+        
+        # todo: this is kinda dirty (selecting one class randomly if there are multiple)
+        y_numeric = -1        
+        if sum(class_vec) > 0.0: # one or more classes found
+            class_indices = np.where(class_vec>0.0)[0]
+            y_numeric = random.choice(class_indices)
+            if (sum(class_vec)>1): 
+                print('found multiple classes for name '+filename+' (choosing one randomly)')
+                pass
+                # class_vec[:] = 0.0
+                # class_vec[rand_class] = 1.0
+        
         # class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
         class_vec = class_vec.to(device=self.device)
         # if not class_vec.any(): print('couldnt find class for name: '+filename)
 
         # load audio from file and encode it
         wav_data = self.load_audio(file)
-        x, y = self.encode_sample(wav_data)
+        x, x_transposed = self.encode_sample(wav_data)
 
 
 
-        return x, y, class_vec
+        return x, x_transposed, class_vec, y_numeric
     
     def load_audio(self, file):
         data, sample_hz = torchaudio.load(file)

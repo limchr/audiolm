@@ -12,12 +12,16 @@ import math
 import audiolm_pytorch.data as data
 from dataclasses import dataclass
 from audiolm_pytorch.condition_cnn import ConditionCNN
+from audiolm_pytorch.utils import get_class_weighted_sampler
 
 import random
 import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib
+
+from sklearn.model_selection import train_test_split
+
 
 seed = 1234
 torch.manual_seed(seed)
@@ -76,7 +80,8 @@ def get_optimizer():
     return optimizer
 optimizer = get_optimizer()
 
-def det_loss(cnn,dl):
+def det_loss(cnn,ds):
+    dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # get new dataloader because we want random sampling here!
     losses = []
     cnn.eval()
     for d in dl:
@@ -102,39 +107,62 @@ def print_param_stats(model):
 # data initialization
 #
 
-ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
-dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', False)
-train_size = math.floor(0.7 * len(dsb))
-val_size = math.floor(0.3 * len(dsb))
-test_size = len(dsb) - train_size - val_size
+def get_audio_dataset(audiofile_path, 
+                      dump_path, 
+                      build_dump_from_scratch, 
+                      test_size,
+                      equalize_class_distribution,
+                      equalize_train_data_loader_distribution,
+                      seed):
 
-ds_train, ds_test, ds_val = random_split(dsb, [train_size, test_size, val_size])
+    ds = data.EncodecSoundDataset(folder=audiofile_path, seed=seed)
+    dsb = data.BufferedDataset(ds, dump_path, build_dump_from_scratch)
+    ys_numeric = [yy[3] for yy in dsb]
+    stratify = ys_numeric if equalize_class_distribution else None
+    train_indices, val_indices = train_test_split(np.arange(len(ys_numeric)), 
+                                                test_size=test_size, 
+                                                random_state=seed,
+                                                shuffle=True,
+                                                stratify=stratify)
 
+    ds_train = torch.utils.data.Subset(dsb, train_indices)
+    ds_val = torch.utils.data.Subset(dsb, val_indices)
 
-# some sanity debug checks
+    if equalize_train_data_loader_distribution:
+        sampler = get_class_weighted_sampler(ds_train)
+        dl_train = DataLoader(ds_train, batch_size=batch_size, sampler=sampler) # not shuffled should be ok because we shuffle in data set class
+    else:
+        dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True)
+    
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True) # for validation we don't need a sampler, right?
+    
+    return ds, dsb, ds_train, ds_val, dl_train, dl_val
+
+# get the audio dataset
+ds, dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_path= '/home/chris/data/audio_samples/ds_extracted',
+                                                                dump_path=      '/home/chris/data/buffered_ds_extracted.pkl',
+                                                                build_dump_from_scratch=False,
+                                                                test_size=0.3,
+                                                                equalize_class_distribution=True,
+                                                                equalize_train_data_loader_distribution=True,
+                                                                seed=seed)
+
+#
+## some sanity debug checks
+#
+
+# # select only very few samples for debugging
 # ds_train = torch.utils.data.Subset(ds_train, range(0,10))
 # ds_val = ds_train
 
-from torch.utils.data import WeightedRandomSampler
-yp = []
-for d in ds_train:
-    yp.append(d[2])
-y = torch.stack(yp).cpu().numpy()
+# # check if the dataset is balanced and how the class distribution is
+# ys_numeric_train = [yy[3] for yy in ds_train]
+# ys_numeric_test = [yy[3] for yy in ds_val]
+# for i in range(-1,5):
+#     ratiotrain = np.where(np.array(ys_numeric_train)==i)[0].shape[0]/len(ys_numeric_train)
+#     ratiotest = np.where(np.array(ys_numeric_test)==i)[0].shape[0]/len(ys_numeric_test)
+#     print('class %d train ratio: %.4f \t test ratio: %.4f' % (i, ratiotrain, ratiotest))
 
-cys = [len(np.where(y[:,yy] > 0.)[0]) for yy in range(y.shape[1])]
-totalx = np.sum(cys)
-cys = cys / totalx
-cys = 1/cys
-
-cw = np.zeros(len(y))
-for i in range(len(y)):
-    if y[i].sum() > 0:
-        cw[i] = cys[y[i].argmax()] # not quite correct because there could be multiple classes
-
-sampler = WeightedRandomSampler(cw, len(cw), replacement=True)
-
-dl = DataLoader(ds_train, batch_size=batch_size, sampler=sampler) # shuffle=True
-dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True)
 
 
 
@@ -159,7 +187,7 @@ for i in range(num_passes):
         print_param_stats(cnn)
 
 
-    for d in dl:
+    for d in dl_train:
         sax = d[0]
         # sax[:] = 0.0 # sanity check
         sax = sax[:,:32,:]
@@ -170,8 +198,8 @@ for i in range(num_passes):
         optimizer.step()
     
     if i % 10 == 0:
-        train_loss = det_loss(cnn,dl)
-        val_loss = det_loss(cnn,dl_val)
+        train_loss = det_loss(cnn,ds_train)
+        val_loss = det_loss(cnn,ds_val)
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         
