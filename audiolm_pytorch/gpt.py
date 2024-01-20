@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+import copy
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
@@ -155,10 +157,15 @@ class EncoderBlock(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        # copy config
+        config_no_dropout = copy.deepcopy(config)        
+        # config_no_dropout.dropout = 0.0
+
+
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = Attention(config, is_self_attention=True, is_masked=False)
+        self.attn = Attention(config_no_dropout, is_self_attention=True, is_masked=False)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
-        self.mlp = MLP(config)
+        self.mlp = MLP(config_no_dropout)
 
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))

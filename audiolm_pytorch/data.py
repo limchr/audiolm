@@ -21,6 +21,15 @@ from audiolm_pytorch import EncodecWrapper
 
 import numpy as np
 
+
+from torch.utils.data import WeightedRandomSampler
+from torch.utils.data import DataLoader, random_split
+
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+
+
 # helper functions
 
 def exists(val):
@@ -31,6 +40,95 @@ def cast_tuple(val, length = 1):
 
 def is_unique(arr):
     return len(set(arr)) == len(arr)
+
+
+
+
+
+
+
+def get_class_weighted_sampler(ds):
+    y = []
+    for d in ds:
+        y.append(d[2])
+    y = torch.stack(y).cpu().numpy()
+
+    class_occurrences = [len(np.where(y[:,yy] > 0.)[0]) for yy in range(y.shape[1])]
+    total_occurrences = np.sum(class_occurrences)
+    class_occurrences_normalized = class_occurrences / total_occurrences
+    inverted_normalized_class_occurrences = 1/class_occurrences_normalized
+
+    sample_weights = np.zeros(len(y))
+    for i in range(len(y)):
+        if y[i].sum() > 0: # only use samples that have at least one class (otherwise the sample weight is 0)
+            sample_weights[i] = inverted_normalized_class_occurrences[y[i].argmax()] # not quite correct because there could be multiple classes
+
+    sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
+    return sampler
+
+def get_audio_dataset(audiofile_path, 
+                      dump_path, 
+                      build_dump_from_scratch, 
+                      test_size,
+                      equalize_class_distribution,
+                      equalize_train_data_loader_distribution,
+                      batch_size,
+                      seed):
+
+    ds = EncodecSoundDataset(folder=audiofile_path, seed=seed)
+    dsb = BufferedDataset(ds, dump_path, build_dump_from_scratch)
+    ys_numeric = [yy[3] for yy in dsb]
+    stratify = ys_numeric if equalize_class_distribution else None
+    train_indices, val_indices = train_test_split(np.arange(len(ys_numeric)), 
+                                                test_size=test_size, 
+                                                random_state=seed,
+                                                shuffle=True,
+                                                stratify=stratify)
+
+    ds_train = torch.utils.data.Subset(dsb, train_indices)
+    ds_val = torch.utils.data.Subset(dsb, val_indices)
+
+    if equalize_train_data_loader_distribution:
+        sampler = get_class_weighted_sampler(ds_train)
+        dl_train = DataLoader(ds_train, batch_size=batch_size, sampler=sampler) # not shuffled should be ok because we shuffle in data set class
+    else:
+        dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True)
+    
+    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True) # for validation we don't need a sampler, right?
+    
+    return ds, dsb, ds_train, ds_val, dl_train, dl_val
+
+
+
+#
+## some sanity debug checks
+#
+
+# # select only very few samples for debugging
+# ds_train = torch.utils.data.Subset(ds_train, range(0,10))
+# ds_val = ds_train
+
+# # check if the dataset is balanced and how the class distribution is
+# ys_numeric_train = [yy[3] for yy in ds_train]
+# ys_numeric_test = [yy[3] for yy in ds_val]
+# for i in range(-1,5):
+#     ratiotrain = np.where(np.array(ys_numeric_train)==i)[0].shape[0]/len(ys_numeric_train)
+#     ratiotest = np.where(np.array(ys_numeric_test)==i)[0].shape[0]/len(ys_numeric_test)
+#     print('class %d train ratio: %.4f \t test ratio: %.4f' % (i, ratiotrain, ratiotest))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # dataset functions
 

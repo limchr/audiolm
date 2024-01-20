@@ -20,14 +20,14 @@ device = 'cuda'
 from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = True # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 1000 # num passes through the dataset
+num_passes = 250 # num passes through the dataset
 
 start_iter = 0
-learning_rate = 4e-4 # max learning rate
-weight_decay = 1e-1
+learning_rate = 9e-5 # max learning rate
+weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
-batch_size = 32
+batch_size = 256
 
 seed = 1234
 
@@ -50,10 +50,10 @@ class AudioConfig:
     block_size: int = 150
     block_size_condition: int = 2
     vocab_size: int = 128
-    n_layer: int = 6
-    n_head: int = 6
+    n_layer: int = 5
+    n_head: int = 8
     n_embd: int = 240
-    dropout: float = 0.2
+    dropout: float = 0.25
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 config = AudioConfig()
 model_args = dict(n_layer=config.n_layer, n_head=config.n_head, n_embd=config.n_embd, block_size=config.block_size, bias=config.bias, vocab_size=config.vocab_size, dropout=config.dropout) # start with model_args from command line
@@ -95,27 +95,19 @@ def save_model(checkpoint_path, model,optimizer,model_args,i,best_val_loss,confi
     torch.save(checkpoint, checkpoint_path)
 
 
-
+from audiolm_pytorch.data import get_audio_dataset
 
 if __name__ == '__main__':
-    # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_min')
 
-    ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
-    dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', ds_from_scratch)
-
-    # ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/rarefaction_poke_in_the_ear_with_a_sharp_stick', seed=seed)
-    # dsb = data.BufferedDataset(ds, '/home/chris/data/poke.pkl', ds_from_scratch)
-
-
-    import math
-    train_size = math.floor(0.9 * len(dsb))
-    val_size = math.floor(0.1 * len(dsb))
-    test_size = len(dsb) - train_size - val_size
-
-    ds_train, ds_test, ds_val = random_split(dsb, [train_size, test_size, val_size])
-    dl = DataLoader(ds_train, batch_size=batch_size, shuffle=True)
-    dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True)
-
+    # get the audio dataset
+    ds, dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_path= '/home/chris/data/audio_samples/ds_extracted',
+                                                                    dump_path=      '/home/chris/data/buffered_ds_extracted.pkl',
+                                                                    build_dump_from_scratch=False,
+                                                                    test_size=0.1,
+                                                                    equalize_class_distribution=True,
+                                                                    equalize_train_data_loader_distribution=True,
+                                                                    batch_size=batch_size,
+                                                                    seed=seed)
 
 
 
@@ -135,13 +127,16 @@ if __name__ == '__main__':
 
     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
 
-    condition_cnn = torch.load('results/cnn_model.pt')
+    condition_cnn = torch.load('results/cnn_best_so_far.pt')
+    condition_cnn.eval()
 
     @torch.no_grad()
-    def det_loss_testing(dl, model):
+    def det_loss_testing(ds, model):
+        dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # get new dataloader because we want random sampling here!
+
         model.eval()
         losses = []
-        for dx, dy, sample_class in dl:
+        for dx, dy, _, _ in dl:
             condition_bottleneck = condition_cnn(dx[:,:32,:],True)
             _, loss = model.forward(dx,dy, condition_bottleneck)
             losses.append(loss.cpu().detach().item())    
@@ -156,7 +151,7 @@ if __name__ == '__main__':
 
     model.train()
     for i in range(start_iter,num_passes):
-        for dx, dy, sample_class in dl:
+        for dx, dy, _, _ in dl_train:
             condition_bottleneck = condition_cnn(dx[:,:32,:],True)
             logits, loss = model.forward(dx,dy, condition_bottleneck)
             loss.backward()
@@ -170,25 +165,29 @@ if __name__ == '__main__':
         #     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
         
         if i > int(num_passes*0.9):
-            change_learning_rate = learning_rate * 0.2 * 0.2
+            change_learning_rate = learning_rate * 0.8 * 0.8 * 0.8 * 0.8
         elif i > int(num_passes*0.8):
-            change_learning_rate = learning_rate * 0.2
+            change_learning_rate = learning_rate * 0.8 * 0.8 * 0.8
+        elif i > int(num_passes*0.7):
+            change_learning_rate = learning_rate * 0.8 * 0.8
+        elif i > int(num_passes*0.6):
+            change_learning_rate = learning_rate * 0.8
         if change_learning_rate != actual_learning_rate:   
             print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
             optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=change_learning_rate,betas=(beta1, beta2),device_type=device)
             actual_learning_rate = change_learning_rate
         
-        
-        train_loss = det_loss_testing(dl, model)
-        val_loss = det_loss_testing(dl_val, model)
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        print('ds pass: %d\ttrain loss: %.5f\tval loss: %.5f' % (i, train_loss, val_loss))
+        if i % 1 == 0:
+            train_loss = det_loss_testing(ds_train, model)
+            val_loss = det_loss_testing(ds_val, model)
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+            print('ds pass: %d\ttrain loss: %.5f\tval loss: %.5f' % (i, train_loss, val_loss))
 
-        if i > 0 and val_loss < best_val_loss:
-            best_val_loss = val_loss
-            save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.classes)
-            
+            if i > 0 and val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.classes)
+                
     # save losses plot
     plt.figure()
     plt.plot(train_losses, label='train')
