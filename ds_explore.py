@@ -1,25 +1,45 @@
 import torch
 import torch.nn.functional as F
-import torchaudio
 
 import audiolm_pytorch.data as data
-from torch.utils.data import DataLoader, random_split
-from dataclasses import dataclass
+import experiment_config as ec
 
-import audiolm_pytorch.gpt as gpt
-
-from audiolm_pytorch import EncodecWrapper
-
-import random
 import numpy as np
+import os
 
 import matplotlib.pyplot as plt
 import matplotlib
 
+import random
+
 seed = 1234
 
-ds = data.EncodecSoundDataset(folder='/home/chris/data/audio_samples/ds_extracted', seed=seed)
-dsb = data.BufferedDataset(ds, '/home/chris/data/buffered_ds_extracted.pkl', True)
+torch.manual_seed(seed)
+random.seed(seed)
+np.random.seed(seed)
+
+
+ds = data.EncodecSoundDataset(folders=ec.ds_folders, length=2, seed=seed)
+dsb = data.BufferedDataset(ds, ec.ds_buffer, True)
+
+
+print('faulty files:')
+for f in ds.log_faulty_files: 
+    print(f)
+    # os.rename(f, f + '_faulty')
+
+print('no label: %i files (%.2f%%)' % (len(ds.log_no_label),100 * len(ds.log_no_label) / len(ds)))
+
+for f in ds.log_no_label:
+    print(f)
+    
+
+print('dublicate labels: %i files (%.2f%%)' % (len(ds.log_duplicate_labels),100 *  len(ds.log_duplicate_labels) / len(ds)))
+
+for f in ds.log_duplicate_labels:
+    print(f)
+
+
 
 x = []
 y = []

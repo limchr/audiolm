@@ -66,20 +66,28 @@ def get_class_weighted_sampler(ds):
     sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
     return sampler
 
-def get_audio_dataset(audiofile_path, 
+
+
+
+def get_audio_dataset(audiofile_paths, 
                       dump_path, 
                       build_dump_from_scratch, 
+                      only_labeled_samples,
                       test_size,
                       equalize_class_distribution,
                       equalize_train_data_loader_distribution,
                       batch_size,
                       seed):
 
-    ds = EncodecSoundDataset(folder=audiofile_path, seed=seed)
-    dsb = BufferedDataset(ds, dump_path, build_dump_from_scratch)
-    ys_numeric = [yy[3] for yy in dsb]
-    stratify = ys_numeric if equalize_class_distribution else None
-    train_indices, val_indices = train_test_split(np.arange(len(ys_numeric)), 
+    dsb = BufferedDataset(EncodecSoundDataset(folders=audiofile_paths, length=2, device='cuda', seed=seed), dump_path, build_dump_from_scratch)
+    
+    if only_labeled_samples:
+        labeled_idx = [i for i in range(len(dsb)) if dsb[i][3] >= 0]
+        dsb = torch.utils.data.Subset(dsb, labeled_idx)
+    
+    
+    stratify = [yy[3].item() for yy in dsb] if equalize_class_distribution else None
+    train_indices, val_indices = train_test_split(np.arange(len(dsb)), 
                                                 test_size=test_size, 
                                                 random_state=seed,
                                                 shuffle=True,
@@ -96,7 +104,7 @@ def get_audio_dataset(audiofile_path,
     
     dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True) # for validation we don't need a sampler, right?
     
-    return ds, dsb, ds_train, ds_val, dl_train, dl_val
+    return dsb, ds_train, ds_val, dl_train, dl_val
 
 
 
@@ -125,6 +133,9 @@ def get_audio_dataset(audiofile_path,
 
 
 
+# ds mit nur gelabelten samples
+# uebergeordnete funktion anpassen
+# variable length implementieren
 
 
 
@@ -141,40 +152,57 @@ class EncodecSoundDataset(Dataset):
     @beartype
     def __init__(
         self,
-        folder,
-        target_sample_hz = 24000,
-        exts = ['flac', 'wav', 'mp3', 'webm'],
-        fixed_length = 2,
+        folders,
+        length, # in seconds, None for no fixed length
         device = 'cuda',
         seed = 1234
     ):
-        super().__init__()
-        path = Path(folder)
-        assert path.exists(), f'folder "{str(path)}" does not exist'
-        files = sorted([str(file) for ext in exts for file in path.glob(f'**/*.{ext}')])
-        random.Random(seed).shuffle(files)
-        assert len(files) > 0, 'no sound files found'
 
-        self.files = files
-
-        self.fixed_length = fixed_length * target_sample_hz
-        self.target_sample_hz = target_sample_hz
+        # define object variables
+        self.rnd = random.Random(seed)
+        self.target_sample_hz = 24000
+        self.length = length * self.target_sample_hz
         self.device = device
+        self.seed = seed
 
+        # extract all audio files from the folders
+        audio_file_extensions = ['flac', 'wav', 'mp3', 'webm']
+        all_files = []
+        super().__init__()
+        for folder in folders:
+            path = Path(folder, follow_symlinks=True)
+            assert path.exists(), f'folder "{str(path)}" does not exist'
+            files = sorted([str(file) for ext in audio_file_extensions for file in path.glob(f'**/*.{ext}')])
+            self.rnd.shuffle(files)
+            assert len(files) > 0, 'no sound files found in folder '+ folder
+            all_files.extend(files)
+        self.rnd.shuffle(all_files) # shuffle everything again
+        self.files = all_files
+
+        # load encodec model
         self.encodec = EncodecWrapper()
         self.encodec.to(device=device)
 
+
+        # todo: maybe make this as parameters (problem: different type of labelings in other data sets than file names)
+
         # self.sound_classes = ['tom', 'snare', 'clap', 'hh', 'hihat', 'crash', 'conga', 'bdrum', 'kick', 'bd', 'perc', 'bell', 'rim', 'slap', 'tamb', 'bongo', 'cymb', 'wood', 'synth', 'clav', 'cow', 'bassdrum', 'ride', 'drum', 'bass', 'snap']
 
+        # class groups ()
         self.class_groups = {
             'tom': ['tom', 'conga', 'bongo'],
             'kick': ['kick', 'bass', 'bassdrum', 'bd', 'bdrum'],
             'snare': ['snare', 'rim', 'snap'],
-            'hihat': ['hihat', 'hh', 'cow', 'tamb', 'wood', 'ride', 'crash', 'cymb', 'bell'],
+            'hihat': ['hihat', 'hi-hat','hh', 'hat', 'cow', 'tamb', 'wood', 'ride', 'crash', 'crush', 'cymb', 'bell'],
             'clap': ['clap'],
+            'synth': ['syn'],
+            # 'perc': ['perc'],
         }
+
+        # names of the classes
         self.classes = list(self.class_groups.keys())
         
+        # mean of the training data (per feature dimension)
         self.fm = torch.tensor([-3.6364e-02,  1.7838e+00, -7.0549e-01, -3.1619e-01, -1.4357e-01,
          1.1365e+00, -3.8665e-01, -3.2779e-02, -5.0044e-01,  4.9229e-01,
          2.0419e-01,  6.1962e-02,  2.5571e-01, -1.0065e+00, -1.9556e-01,
@@ -202,6 +230,10 @@ class EncodecSoundDataset(Dataset):
          9.6864e-02, -1.4728e-01, -1.5250e-01,  4.2296e-01, -2.9448e-01,
         -7.0547e-02, -3.8767e-01,  3.8826e-01]).to(device=device)
         
+        self.log_faulty_files = []
+        self.log_duplicate_labels = []
+        self.log_no_label = []
+        
         
 
 
@@ -209,41 +241,77 @@ class EncodecSoundDataset(Dataset):
     def __len__(self):
         return len(self.files)
 
-    def __getitem__(self, idx):
-        file = self.files[idx]
-        filename = file.__str__()[file.__str__().rfind('/')+1:]
+    def get_label_from_path(self, file):
+        fni = file.rfind('/')
+        fnd = file.rfind('/', 0, fni)
+
+        filename = file[fni+1:].lower()
+        filename_and_parent = file[fnd+1:].lower()
         
         # define class vector
-        class_vec = torch.zeros(len(self.class_groups.keys()))
+        # check if filename contains class name, if multiple classes are found, choose meta class either randomly or last occurence
+        y_vec = torch.zeros(len(self.class_groups.keys()))
         for i, (key, value) in enumerate(self.class_groups.items()):
-            in_group = [1.0 if name in filename.lower() else 0.0 for name in value]
-            class_vec[i] = 1.0 if sum(in_group)>0.0 else 0.0
+            in_group = [filename_and_parent.rfind(name)+1.0 if name in filename_and_parent.lower() else 0.0 for name in value]
+            y_vec[i] = max(in_group)
         
-        # todo: this is kinda dirty (selecting one class randomly if there are multiple)
-        y_numeric = -1        
-        if sum(class_vec) > 0.0: # one or more classes found
-            class_indices = np.where(class_vec>0.0)[0]
-            y_numeric = random.choice(class_indices)
-            if (sum(class_vec)>1): 
-                print('found multiple classes for name '+filename+' (choosing one randomly)')
-                pass
-                # class_vec[:] = 0.0
-                # class_vec[rand_class] = 1.0
+        # if there are multiple classes present, y_vec includes all of them
+        # y_numeric however can contain only one class
+        # either select one randomly or select the last occurence of a class in the string
+        # this is kinda dirty but for sometimes only one class is needed
+        select_randomly = False # randomly or last occurence
         
-        # class_vec = torch.tensor([1.0 if name in filename.lower() else 0.0 for name in self.sound_classes])
-        class_vec = class_vec.to(device=self.device)
-        # if not class_vec.any(): print('couldnt find class for name: '+filename)
+        y_numeric = torch.tensor([-1]) 
+        num_classes_found = len(np.where(y_vec>0.0)[0])     
+        
+        class_indices = np.where(y_vec>0.0)[0] # which classes are found
+        
+        if num_classes_found > 0: # at least one class found
+            if select_randomly:
+                y_numeric = random.choice(class_indices)
+            else:
+                y_numeric = np.argmax(y_vec) # select the class which is last in string, because this is probably the class, e.g. 'clappy kick' is probably a kick and not a clap
+        
+        if num_classes_found > 1: # two or more classes found
+            print('found multiple classes for name '+filename+' choosing class: '+str(self.classes[y_numeric.item()]))
+            # set all classes to 0.0 except the selected one
+            # this could be also commented out for training with multiple classes
+            y_vec[:] = 0.0
+            y_vec[y_numeric] = 1.0
+            self.log_duplicate_labels.append([filename_and_parent, class_indices, self.classes[y_numeric.item()]])
 
+        # # using all class occurences for training
+        y_vec[y_vec>1.0] = 1.0 # we are saving string positions here, so set all positive classes to 1.0
+        
+        ## debug check
+        if not y_vec.any(): 
+            print('couldnt find class for name: '+filename_and_parent)
+            self.log_no_label.append(filename_and_parent)
+
+
+        return y_numeric, y_vec
+
+    def __getitem__(self, idx):
+        file = self.files[idx]
+        y_numeric, y_vec = self.get_label_from_path(file)
+        
         # load audio from file and encode it
         wav_data = self.load_audio(file)
         x, x_transposed = self.encode_sample(wav_data)
 
 
-
-        return x, x_transposed, class_vec, y_numeric
+        y_vec = y_vec.to(self.device)
+        y_numeric = y_numeric.to(self.device)
+        return x, x_transposed, y_vec, y_numeric
     
     def load_audio(self, file):
-        data, sample_hz = torchaudio.load(file)
+        try:
+            data, sample_hz = torchaudio.load(file)
+        except:
+            print('error loading file '+file)
+            data, sample_hz = torch.zeros((1,20000)), 24000 # todo: this is a hack to make it work with the sampler
+            self.faulty_files.append(file)
+            
 
         assert data.numel() > 0, f'one of your audio file ({file}) is empty. please remove it from your folder'
 
@@ -259,10 +327,10 @@ class EncodecSoundDataset(Dataset):
         
         # unifying the length of samples by cropping too long samples
         # of by filling too short samples with zeros
-        if audio_length > self.fixed_length:
-            data = data[:, 0:self.fixed_length]
+        if audio_length > self.length:
+            data = data[:, 0:self.length]
         else:
-            data2 = torch.zeros((1,self.fixed_length),dtype=torch.float32)
+            data2 = torch.zeros((1,self.length),dtype=torch.float32)
             data2[0,:data.shape[1]] = data
             data = data2
 

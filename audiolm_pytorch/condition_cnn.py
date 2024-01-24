@@ -49,8 +49,7 @@ class ConditionCNN(nn.Module):
             x = getattr(self, 'fc1{}'.format(i))(x)
             x = getattr(self, 'bn1{}'.format(i))(x)
             x = self.relu(x)
-            if i < len(self.pre_layers)-0:
-                x = self.dropout(x)
+            x = self.dropout(x)
         
 
         x = self.bottleneck(x)
@@ -59,7 +58,7 @@ class ConditionCNN(nn.Module):
         if bn_only:
             return bn
 
-        for i in range(1,len(self.post_layers)-2):
+        for i in range(1,len(self.post_layers)-1):
             x = getattr(self, 'fc2{}'.format(i))(x)
             x = getattr(self, 'bn2{}'.format(i))(x)
             x = self.relu(x)

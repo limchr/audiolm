@@ -17,17 +17,17 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 device = 'cuda'
-from_scratch = True # train model from scratch, otherwise load from checkpoint
-ds_from_scratch = True # create data set dump from scratch (set True if data set or pre processing has changed)
+from_scratch = False # train model from scratch, otherwise load from checkpoint
+ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 250 # num passes through the dataset
+num_passes = 2500 # num passes through the dataset
 
 start_iter = 0
 learning_rate = 9e-5 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
-batch_size = 256
+batch_size = 512
 
 seed = 1234
 
@@ -50,10 +50,10 @@ class AudioConfig:
     block_size: int = 150
     block_size_condition: int = 2
     vocab_size: int = 128
-    n_layer: int = 5
+    n_layer: int = 6
     n_head: int = 8
     n_embd: int = 240
-    dropout: float = 0.25
+    dropout: float = 0.35
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 config = AudioConfig()
 model_args = dict(n_layer=config.n_layer, n_head=config.n_head, n_embd=config.n_embd, block_size=config.block_size, bias=config.bias, vocab_size=config.vocab_size, dropout=config.dropout) # start with model_args from command line
@@ -99,17 +99,18 @@ from audiolm_pytorch.data import get_audio_dataset
 
 if __name__ == '__main__':
 
+    from experiment_config import ds_folders, ds_buffer
+
     # get the audio dataset
-    ds, dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_path= '/home/chris/data/audio_samples/ds_extracted',
-                                                                    dump_path=      '/home/chris/data/buffered_ds_extracted.pkl',
-                                                                    build_dump_from_scratch=False,
-                                                                    test_size=0.1,
+    dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_folders,
+                                                                    dump_path= ds_buffer,
+                                                                    build_dump_from_scratch=ds_from_scratch,
+                                                                    only_labeled_samples=True,
+                                                                    test_size=0.2,
                                                                     equalize_class_distribution=True,
                                                                     equalize_train_data_loader_distribution=True,
                                                                     batch_size=batch_size,
                                                                     seed=seed)
-
-
 
     # training from scratch
     if from_scratch:
@@ -127,7 +128,7 @@ if __name__ == '__main__':
 
     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
 
-    condition_cnn = torch.load('results/cnn_best_so_far.pt')
+    condition_cnn = torch.load('results/cnn_model.pt')
     condition_cnn.eval()
 
     @torch.no_grad()
@@ -151,9 +152,17 @@ if __name__ == '__main__':
 
     model.train()
     for i in range(start_iter,num_passes):
-        for dx, dy, _, _ in dl_train:
+        for dx, dy, _, numeric_y in dl_train: # training is unsupervised so we don't need the labels (only shifted x)
             condition_bottleneck = condition_cnn(dx[:,:32,:],True)
-            logits, loss = model.forward(dx,dy, condition_bottleneck)
+            rnds = torch.randn_like(condition_bottleneck).to(device) * 0.1
+            condition_z = condition_bottleneck+rnds
+            
+            # # debug plot for condition_z:
+            # cplt = condition_z.cpu().detach().numpy()
+            # plt.scatter(cplt[:,0],cplt[:,1], c=numeric_y.cpu().detach().numpy(), cmap='tab10')
+            # plt.savefig('results/condition_z.png')
+            
+            logits, loss = model.forward(dx,dy, condition_z)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
@@ -165,19 +174,21 @@ if __name__ == '__main__':
         #     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
         
         if i > int(num_passes*0.9):
-            change_learning_rate = learning_rate * 0.8 * 0.8 * 0.8 * 0.8
+            change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6 * 0.6
         elif i > int(num_passes*0.8):
-            change_learning_rate = learning_rate * 0.8 * 0.8 * 0.8
+            change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6
         elif i > int(num_passes*0.7):
-            change_learning_rate = learning_rate * 0.8 * 0.8
+            change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6
         elif i > int(num_passes*0.6):
-            change_learning_rate = learning_rate * 0.8
+            change_learning_rate = learning_rate * 0.6 * 0.6
+        elif i > int(num_passes*0.5):
+            change_learning_rate = learning_rate * 0.6
         if change_learning_rate != actual_learning_rate:   
             print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
             optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=change_learning_rate,betas=(beta1, beta2),device_type=device)
             actual_learning_rate = change_learning_rate
         
-        if i % 1 == 0:
+        if i % 2 == 0:
             train_loss = det_loss_testing(ds_train, model)
             val_loss = det_loss_testing(ds_val, model)
             train_losses.append(train_loss)
@@ -186,13 +197,14 @@ if __name__ == '__main__':
 
             if i > 0 and val_loss < best_val_loss:
                 best_val_loss = val_loss
-                save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,ds.classes)
+                save_model('results/ckpt.pt', model,optimizer,model_args,i,best_val_loss,config,dsb.dataset.dataset.classes)
                 
-    # save losses plot
-    plt.figure()
-    plt.plot(train_losses, label='train')
-    plt.plot(val_losses, label='val')
-    plt.legend()
-    plt.savefig('results/losses.png')
-    plt.show()
+            # save losses plot
+            plt.close(0)
+            plt.figure(0)
+            plt.plot(train_losses, label='train')
+            plt.plot(val_losses, label='val')
+            plt.legend()
+            plt.savefig('results/losses.png')
+            # plt.show()
 

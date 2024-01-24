@@ -4,14 +4,31 @@
 # https://mega.nz/folder/EmYBhChT#rDPBupU4AQAyALSq2j3YuA
 
 
+import urllib.request
+import os
+from bs4 import BeautifulSoup
+
+
+
+def extract_archives(archives_dir, extract_dir):
+    for file in os.listdir(archives_dir):
+        if file.endswith(".rar"):
+            cms = 'unrar x "%s" "%s"' % (os.path.join(archives_dir, file), extract_dir)
+            print(cms)
+            os.system(cms)
+        if file.endswith(".zip"):
+            cms = 'unzip "%s" -d "%s"' % (os.path.join(archives_dir, file), extract_dir)
+            print(cms)
+            os.system(cms)
+
 
 url = 'https://samples.kb6.de/downloads_en.php'
 
-import urllib.request
 
 masterurl = 'https://samples.kb6.de'
-outdir = '/home/chris/data/audio_samples/ds'
-import os
+archive_dir = '/home/chris/data/audio_samples/ds'
+wav_out_dir = '/home/chris/data/audio_samples/ds_extracted'
+
 
 
 fp = urllib.request.urlopen(url)
@@ -23,7 +40,6 @@ fp.close()
 print(mystr)
 
 
-from bs4 import BeautifulSoup
 
 soup = BeautifulSoup(mystr, 'html.parser')
 
@@ -39,16 +55,22 @@ for l in links:
 
 
 for p in packs:
-    str = 'wget -P %s %s/%s' % (outdir,masterurl,p)
+    str = 'wget -P %s %s/%s' % (archive_dir,masterurl,p)
     os.system(str)    
 
-wav_out_dir = '/home/chris/data/audio_samples/ds_extracted'
 
-for file in os.listdir(outdir):
-    if file.endswith(".rar"):
-        cms = 'unrar x %s %s' % (os.path.join(outdir, file), wav_out_dir)
-        print(cms)
-        os.system(cms)
+
+extract_archives(archive_dir, wav_out_dir)
+
+
+
+
+# other sample packs
+input_dir = '/home/chris/data/audio_samples/SAMPLE PACKS/'
+
+extract_archives(input_dir, wav_out_dir)
+
+
 
 # wav files from this two directories are corrupted
 # rm -r [KB6]_Yamaha_CS15D
