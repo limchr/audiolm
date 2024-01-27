@@ -17,10 +17,10 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 device = 'cuda'
-from_scratch = False # train model from scratch, otherwise load from checkpoint
+from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 2500 # num passes through the dataset
+num_passes = 1200 # num passes through the dataset
 
 start_iter = 0
 learning_rate = 9e-5 # max learning rate
@@ -39,6 +39,28 @@ best_val_loss = 1e9
 # 2d only: export training points and classify each background-image pixel with nearest neighbor classifier for visualizing the class distribution on a html canvas element for the user to select a 2d point with the mouse
 # 2,5d: extend the 2d idea with a slider next to the visualization for changing the z-direction. Changing the slider value could also change the calculated color distribution and the slider color could represent which classes are present at a specific z coordinate
 # 4d: two 2d plots next to each other for selecting 4d point. Problem: User could select hihat in one and kick in the other plot. Weired results? Maybe a training of "mixed samples" is possible for compensate this?
+
+
+# generate a sample map by choosing from the 2d embedding a real sample (by nearest neighbor) for checking if the 2d embedding actually has a meaningful representation of the samples
+# distance between generated and related real sample
+# embedding with 64 time shape, 1D convolutions in time dimension like in encodec paper
+# try out VAE again with 1d convolutions
+# gan architecture
+# Randomizing generation in transformer for more variety (not most probable sample is taken but randomly from best 5 or so)
+# consider quantized output of encodec model (one torch embedding for each index dimension)
+# decoder only?
+
+# mehr samples anhoeren und auch label checken
+# va nochmal ausprobieren
+
+
+# style transfer, style gan paper nochmal lesen
+# 2d embedding: 2d embedding with 64 time shape
+# evaluation metrices:
+
+# loss
+# user listening tests (which sounds better?)
+# generate audio for all the 2d points of the training data and compare with the original audio embedding. How accurate is it? For in between points, how similar is it to nearby points? We want to have a novelty factor in the generated audio, but it should still be similar to the original audio
 
 
 torch.manual_seed(seed)
@@ -128,8 +150,8 @@ if __name__ == '__main__':
 
     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
 
-    condition_cnn = torch.load('results/cnn_model.pt')
-    condition_cnn.eval()
+    condition_network = torch.load('results/vaes/vae_100.pt')
+    condition_network.eval()
 
     @torch.no_grad()
     def det_loss_testing(ds, model):
@@ -138,7 +160,7 @@ if __name__ == '__main__':
         model.eval()
         losses = []
         for dx, dy, _, _ in dl:
-            condition_bottleneck = condition_cnn(dx[:,:32,:],True)
+            condition_bottleneck = condition_network(dx,True)[0]
             _, loss = model.forward(dx,dy, condition_bottleneck)
             losses.append(loss.cpu().detach().item())    
         model.train()
@@ -153,10 +175,11 @@ if __name__ == '__main__':
     model.train()
     for i in range(start_iter,num_passes):
         for dx, dy, _, numeric_y in dl_train: # training is unsupervised so we don't need the labels (only shifted x)
-            condition_bottleneck = condition_cnn(dx[:,:32,:],True)
-            rnds = torch.randn_like(condition_bottleneck).to(device) * 0.1
-            condition_z = condition_bottleneck+rnds
-            
+            condition_bottleneck = condition_network(dx,True)[0]
+            # rnds = torch.randn_like(condition_bottleneck).to(device) * 0.1
+            # condition_z = condition_bottleneck+rnds
+            condition_z = condition_bottleneck
+
             # # debug plot for condition_z:
             # cplt = condition_z.cpu().detach().numpy()
             # plt.scatter(cplt[:,0],cplt[:,1], c=numeric_y.cpu().detach().numpy(), cmap='tab10')

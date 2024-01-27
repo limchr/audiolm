@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 
-from encodec_transformer import load_model, AudioConfig
+from transformer_train import load_model, AudioConfig
 
 device = 'cuda'
 seed = 1234

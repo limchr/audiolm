@@ -78,8 +78,8 @@ def get_audio_dataset(audiofile_paths,
                       equalize_train_data_loader_distribution,
                       batch_size,
                       seed):
-
-    dsb = BufferedDataset(EncodecSoundDataset(folders=audiofile_paths, length=2, device='cuda', seed=seed), dump_path, build_dump_from_scratch)
+    pds = EncodecSoundDataset(folders=audiofile_paths, length=2, device='cuda', seed=seed)
+    dsb = BufferedDataset(pds, dump_path, build_dump_from_scratch)
     
     if only_labeled_samples:
         labeled_idx = [i for i in range(len(dsb)) if dsb[i][3] >= 0]
@@ -103,6 +103,11 @@ def get_audio_dataset(audiofile_paths,
         dl_train = DataLoader(ds_train, batch_size=batch_size, shuffle=True)
     
     dl_val = DataLoader(ds_val, batch_size=batch_size, shuffle=True) # for validation we don't need a sampler, right?
+    
+    # make the original dataset available for some properties and functionalities (danger: no sampling or split applied)
+    dsb.ds = pds
+    ds_train.ds = pds
+    ds_val.ds = pds
     
     return dsb, ds_train, ds_val, dl_train, dl_val
 
