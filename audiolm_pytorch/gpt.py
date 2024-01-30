@@ -176,50 +176,14 @@ class EncoderBlock(nn.Module):
 
 @dataclass
 class GPTConfig:
-    block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-    dropout: float = 0.0
-    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-
-
-
-
-
-class ConditionCNN(nn.Module):
-    def __init__(self):
-        super(ConditionCNN, self).__init__()
-        # Convolutional layers
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 16, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(16, 8, kernel_size=3, stride=1, padding=1)
-        # self.conv4 = nn.Conv2d(8, 4, kernel_size=3, stride=1, padding=1)
-        # Max pooling layer
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        # Fully connected layers
-        self.fc1 = nn.Linear(16*18*8, 512)
-        self.fc2 = nn.Linear(512, 128)
-        self.fc3 = nn.Linear(128, 32)
-        self.fc4 = nn.Linear(32, 2)
-
-    def forward(self, x):
-        x = x.view([x.shape[0], 1, x.shape[1], x.shape[2]] )
-        # Convolutional layers with ReLU activation and max pooling
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = self.pool(torch.relu(self.conv3(x)))
-        # x = self.pool(torch.relu(self.conv4(x)))
-        # Flatten the output for the fully connected layers
-        x = x.view(-1, 16*18*8)
-        # Fully connected layers with ReLU activation
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.tanh(self.fc4(x))
-        return x
-
+    block_size: int = None
+    vocab_size: int = None # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    n_layer: int = None
+    n_head: int = None
+    n_embd: int = None
+    dropout: float = None
+    bias: bool = None # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    block_size_condition: int = None
 
 
 
@@ -227,6 +191,7 @@ class ConditionedGPT(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        config = GPTConfig(**config)
         assert config.vocab_size is not None
         assert config.block_size is not None
         assert config.block_size_condition is not None
@@ -369,7 +334,7 @@ class ConditionedGPT(nn.Module):
             config_args['dropout'] = override_args['dropout']
         # create a from-scratch initialized minGPT model
         config = GPTConfig(**config_args)
-        model = GPT(config)
+        model = ConditionedGPT(config)
         sd = model.state_dict()
         sd_keys = sd.keys()
         sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] # discard this mask / buffer, not a param
@@ -415,14 +380,14 @@ class ConditionedGPT(nn.Module):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        # print(f"using fused AdamW: {use_fused}")
 
         return optimizer
 

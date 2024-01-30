@@ -78,7 +78,7 @@ def get_audio_dataset(audiofile_paths,
                       equalize_train_data_loader_distribution,
                       batch_size,
                       seed):
-    pds = EncodecSoundDataset(folders=audiofile_paths, length=2, device='cuda', seed=seed)
+    pds = EncodecSoundDataset(folders=audiofile_paths, length=2, device='cpu', seed=seed)
     dsb = BufferedDataset(pds, dump_path, build_dump_from_scratch)
     
     if only_labeled_samples:
@@ -159,8 +159,8 @@ class EncodecSoundDataset(Dataset):
         self,
         folders,
         length, # in seconds, None for no fixed length
-        device = 'cuda',
-        seed = 1234
+        device,
+        seed
     ):
 
         # define object variables

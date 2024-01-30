@@ -23,15 +23,16 @@ import matplotlib
 from experiment_config import ds_folders, ds_buffer
 
 
-seed = 1234
+# we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
+seed = 1236
 torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
+torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-
-num_passes = 2000
+num_passes = 1000
 batch_size = 512
 lr = 6e-4 # learning rate
 wd = 0.1 # weight decay
@@ -90,14 +91,20 @@ loss_fn = nn.MSELoss(reduction='sum')
 def loss_fn2(x, x_hat, mean, var, beta = 1.):
     normalization = x.shape[0]*x.shape[1]*x.shape[2]
 
-    reproduction_loss = loss_fn(x_hat, x) / normalization
+    # weighting function for increasing the weight of the beginning of the sample
+    weight = torch.zeros_like(x)
+    for i in range(x.shape[1]):
+        weight[:,i,:] = 1-(i/x.shape[1])**2
+
+    weight = 1/weight.mean() * weight
+    reproduction_loss = loss_fn(x_hat*weight, x*weight) / normalization
     kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
     # kl_loss = 0
 
 
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
 
-    kl_loss += torch.mean(torch.abs(l-0.9)) * 0.0001
+    # kl_loss += torch.mean(torch.abs(l-0.9)) * 0.0001
     # loss = (l*0.35)**32
 
     li = reproduction_loss.item()
@@ -110,8 +117,9 @@ def det_loss(va,ds):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # same class distribution as dataset
     losses = []
     va.eval()
-    for d in dl:
-        x, x_hat, mean, var = va.forward(d[0])
+    for dx, _, _, _ in dl:
+        dx = dx.to(device)
+        x, x_hat, mean, var = va.forward(dx)
         rec_loss, kld_loss = loss_fn2(x, x_hat, mean, var)
         losses.append([rec_loss.item(), kld_loss.item()])
     va.train()
@@ -142,15 +150,16 @@ for i in range(num_passes):
         print_param_stats(va)
 
 
-    for d in dl_train:
-        x, x_hat, mean, var = va.forward(d[0])
+    for dx, _, _, _ in dl_train:
+        dx = dx.to(device)
+        x, x_hat, mean, var = va.forward(dx)
         rec_loss, kld_loss = loss_fn2(x, x_hat, mean, var)
         loss = rec_loss + kld_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
     
-    if i % 1 == 0:
+    if i % 10 == 0:
         train_loss_rec, train_loss_kld = det_loss(va,ds_train)
         val_loss_rec, val_loss_kld = det_loss(va,ds_val)
         train_losses.append([train_loss_rec, train_loss_kld])
@@ -160,7 +169,7 @@ for i in range(num_passes):
             % (i,train_loss_rec+train_loss_kld, train_loss_rec, train_loss_kld, val_loss_rec+val_loss_kld, val_loss_rec, val_loss_kld))
         
         print('saving model of epoch %d' % i)
-        torch.save(va, 'results/vaes/vae_%d.pt' % i)
+        torch.save(va, 'results/vaes/vae2_%d.pt' % i)
 
 
 
@@ -192,7 +201,7 @@ for i in range(num_passes):
         for i in range(len(classes)):
             samples_of_class = dsx[dsy==i]
             if len(samples_of_class) > 0:
-                outp_mean, outp_var  = va(samples_of_class,encoder_only=True)    
+                outp_mean, outp_var  = va.forward(samples_of_class.to(device),encoder_only=True)    
                 px = outp_mean.cpu().detach().numpy()
                 plt.scatter(px[:,0], px[:,1], label=classes[i], s=0.1, alpha=0.7)
 
@@ -212,7 +221,7 @@ for i in range(num_passes):
                 f, axarr = plt.subplots(1,2) 
 
                 cl_name = classes[i]
-                x, x_hat, x_mean, x_log_var = va.forward(samples_of_class)
+                x, x_hat, x_mean, x_log_var = va.forward(samples_of_class.to(device))
                 xorig = x[0].cpu().detach().numpy()
                 xrec = x_hat[0].cpu().detach().numpy()
                 axarr[0].imshow(xorig)

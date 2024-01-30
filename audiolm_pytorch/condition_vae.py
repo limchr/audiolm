@@ -9,10 +9,6 @@ import numpy as np
 device = 'cuda'
 seed = 1234
 
-torch.manual_seed(seed)
-random.seed(seed)
-np.random.seed(seed)
-
 # vgl https://github.com/Jackson-Kang/Pytorch-VAE-tutorial/blob/master/01_Variational_AutoEncoder.ipynb
 
 class ConditionEncoder(nn.Module):
