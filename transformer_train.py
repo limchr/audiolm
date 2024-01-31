@@ -20,8 +20,7 @@ import matplotlib
 
 
 from audiolm_pytorch.data import get_audio_dataset
-from experiment_config import ds_folders, ds_buffer
-
+from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer
 
 
 device = 'cuda'
@@ -30,11 +29,11 @@ ds_from_scratch = False # create data set dump from scratch (set True if data se
 
 num_passes = 500 # num passes through the dataset
 
-learning_rate = 9e-5 # max learning rate
+learning_rate = 6e-4 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
-batch_size = 512
+batch_size = 128
 
 seed = 1234
 
@@ -78,10 +77,10 @@ config = dict(
     block_size = 150,
     block_size_condition = 2,
     vocab_size = 128,
-    n_layer = 10,
-    n_head = 5,
-    n_embd = 240,
-    dropout = 0.35,
+    n_layer = 14,
+    n_head = 8,
+    n_embd = 440,
+    dropout = 0.15,
     bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 )
 
@@ -149,7 +148,7 @@ if __name__ == '__main__':
         return np.mean(losses)
 
 
-    def train():
+    def train(is_parameter_search):
         # load model
         # training from scratch
         start_iter = 0
@@ -160,7 +159,7 @@ if __name__ == '__main__':
         else: 
             print(f"Resuming training from checkpoint")
             # resume training from a checkpoint.
-            ckpt_path = 'results/ckpt.pt'
+            ckpt_path = ckpt_transformer
             model, checkpoint = load_model(ckpt_path)
             start_iter = checkpoint['iter_num']
             best_val_loss = checkpoint['best_val_loss']
@@ -169,7 +168,7 @@ if __name__ == '__main__':
 
         optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
         
-        condition_model = torch.load('results/vaes/vae_100.pt')
+        condition_model = torch.load(ckpt_vae)
         condition_model.eval()
 
         # do not change
@@ -225,39 +224,43 @@ if __name__ == '__main__':
             elif i > int(num_passes*0.5):
                 change_learning_rate = learning_rate * 0.6
             if change_learning_rate != actual_learning_rate:   
-                # print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
                 optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=change_learning_rate,betas=(beta1, beta2),device_type=device)
                 actual_learning_rate = change_learning_rate
-            
+                if not is_parameter_search:
+                    print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
+
             # plot training stats
-            if i % 2 == 0:
+            if i % 3 == 0:
                 train_loss = det_loss_testing(ds_train, model, condition_model)
                 val_loss = det_loss_testing(ds_val, model, condition_model)
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
-                # print('ds pass: %d\ttrain loss: %.5f\tval loss: %.5f' % (i, train_loss, val_loss))
+                if not is_parameter_search:
+                    print('%d/%d\ttrain loss: %.5f\tval loss: %.5f \tbest train loss: %.5f \tbest val loss: %.5f (epoch %i)' % (i, num_passes, train_loss, val_loss, best_train_loss, best_val_loss, best_val_loss_iter))
 
                 if i > 0 and val_loss < best_val_loss:
                     best_val_loss = val_loss
                     best_val_loss_iter = i
-                    save_model('results/ckpt.pt', model, optimizer, i, best_val_loss, config)
+                    if not is_parameter_search:
+                        print('saving model to %s with val loss %.5f' % (ckpt_transformer, best_val_loss))
+                        save_model(ckpt_transformer, model, optimizer, i, best_val_loss, config)
                 if i > 0 and train_loss < best_train_loss:
                     best_train_loss = train_loss
                     best_train_loss_iter = i
 
                     
+                if not is_parameter_search:    
+                    # save losses plot
+                    plt.close(0)
+                    plt.figure(0)
+                    plt.plot(train_losses, label='train')
+                    plt.plot(val_losses, label='val')
+                    plt.legend()
+                    plt.savefig('results/losses.png')
+                    # plt.show()
                     
-                # save losses plot
-                plt.close(0)
-                plt.figure(0)
-                plt.plot(train_losses, label='train')
-                plt.plot(val_losses, label='val')
-                plt.legend()
-                plt.savefig('results/losses.png')
-                # plt.show()
-                
                 # early stopping
-                if i > best_val_loss_iter + 10:
+                if i > best_val_loss_iter + 20:
                     print('early stopping at pass %d' % i)
                     break
                 
@@ -267,51 +270,43 @@ if __name__ == '__main__':
 
         return iteration, best_val_loss, best_val_loss_iter, best_train_loss, best_train_loss_iter
     
+    
     # doing a random search
-    with open('results/parameter_search.csv', 'w') as f:
-        f.write("n_head,n_layer,n_embd,learning_rate,dropout,iteration,best_val_loss,best_val_loss_iter,best_train_loss,best_train_loss_iter\n")
+    
+    def random_parameter_search():
+        random.seed(None) # reset seed to current time
+        
+        # # initialize new csv file
+        # with open('results/parameter_search.csv', 'w') as f:
+        #     f.write("n_head,n_layer,n_embd,learning_rate,dropout,iteration,best_val_loss,best_val_loss_iter,best_train_loss,best_train_loss_iter\n")
 
-    for ran_trial in range(2000):
-        config['n_head'] = random.choice([1,2,3,4,5,6,8,10,12])
-        config['n_layer'] = random.randint(1,12)
-        
-        config['n_embd'] = random.randint(10,50)*10
-        while config['n_embd'] % config['n_head'] != 0:
-            config['n_embd'] = random.randint(10,50)*10
-        learning_rate = 10**random.uniform(-5,-3)
-        config['dropout'] = random.uniform(0,0.5)
-        
-        # print out selected parameters
-        print(f"n_head: {config['n_head']}, n_layer: {config['n_layer']}, n_embd: {config['n_embd']}, learning_rate: {learning_rate}, dropout: {config['dropout']}")
+        for ran_trial in range(2000):
+            config['n_head'] = random.choice([5,6,8,10,12,14])
+            config['n_layer'] = random.randint(14,22)
+            
+            config['n_embd'] = random.randint(30,50)*10
+            while config['n_embd'] % config['n_head'] != 0:
+                config['n_embd'] = random.randint(30,50)*10
+            learning_rate = random.uniform(0.0001,0.00001)
+            config['dropout'] = random.uniform(0.1,0.2)
+            
+            # print out selected parameters
+            print(f"n_head: {config['n_head']}, n_layer: {config['n_layer']}, n_embd: {config['n_embd']}, learning_rate: {learning_rate}, dropout: {config['dropout']}")
 
-        iteration, best_val_loss, best_val_loss_iter, best_train_loss, best_train_loss_iter = -1, -1, -1, -1, -1
-        try:
-            iteration, best_val_loss, best_val_loss_iter, best_train_loss, best_train_loss_iter = train()
-            print(ran_trial, best_val_loss)
-        except:
-            print("failed")
-        
-        # save all parameters and results in csv file:
-        with open('results/parameter_search.csv', 'a') as f:
-            f.write(f"{config['n_head']},{config['n_layer']},{config['n_embd']},{learning_rate},{config['dropout']},{iteration},{best_val_loss},{best_val_loss_iter},{best_train_loss},{best_train_loss_iter}\n")
-        
+            iteration, best_val_loss, best_val_loss_iter, best_train_loss, best_train_loss_iter = -1, -1, -1, -1, -1
+            try:
+                iteration, best_val_loss, best_val_loss_iter, best_train_loss, best_train_loss_iter = train(is_parameter_search=True)
+                print(ran_trial, best_val_loss)
+            except:
+                print("failed")
             
+            # save all parameters and results in csv file:
+            with open('results/parameter_search.csv', 'a') as f:
+                f.write(f"{config['n_head']},{config['n_layer']},{config['n_embd']},{learning_rate},{config['dropout']},{iteration},{best_val_loss},{best_val_loss_iter},{best_train_loss},{best_train_loss_iter}\n")
             
-        print("")
-        torch.cuda.empty_cache()
+                
+            print("")
+            torch.cuda.empty_cache()
     
-    
-    
-    # doing a gridsearch
-    # if n_head is 8, there are gpu memory limits. Why??
-    
-    # for n_head in [3,8,12]:
-    #     for n_layer in [12,8,5]:
-    #         config['n_head'] = n_head
-    #         config['n_layer'] = n_layer
-    #         try:
-    #             best_val_loss = train()
-    #             print(f"n_head: {n_head}, n_layer: {n_layer}, best_val_loss: {best_val_loss}")
-    #         except:
-    #             print(f"n_head: {n_head}, n_layer: {n_layer}, failed")
-    #         torch.cuda.empty_cache()
+    train(is_parameter_search=False)
+    # random_parameter_search()

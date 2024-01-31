@@ -6,7 +6,7 @@ plt.ioff()
 y_label = "best_val_loss"
 
 # Load the data from the CSV file
-data = pd.read_csv("results/parameter_search.csv")
+data = pd.read_csv("results/parameter_search1.csv")
 
 # Display the first few rows of the dataframe to understand its structure
 print("First few rows of the data:")

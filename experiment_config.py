@@ -6,3 +6,7 @@ ds_folders = [
 ]
 
 ds_buffer = '/home/chris/data/audio_samples/audio_combined.pkl'
+
+
+ckpt_vae = 'results/penis_vae.pt'
+ckpt_transformer = 'results/transformer_cpt.pt'
