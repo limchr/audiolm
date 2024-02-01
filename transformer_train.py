@@ -27,7 +27,7 @@ device = 'cuda'
 from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 500 # num passes through the dataset
+num_passes = 300 # num passes through the dataset
 
 learning_rate = 6e-4 # max learning rate
 weight_decay = 0.05
@@ -260,7 +260,7 @@ if __name__ == '__main__':
                     # plt.show()
                     
                 # early stopping
-                if i > best_val_loss_iter + 20:
+                if i > best_val_loss_iter + 30:
                     print('early stopping at pass %d' % i)
                     break
                 
@@ -288,7 +288,7 @@ if __name__ == '__main__':
             while config['n_embd'] % config['n_head'] != 0:
                 config['n_embd'] = random.randint(30,50)*10
             learning_rate = random.uniform(0.0001,0.00001)
-            config['dropout'] = random.uniform(0.1,0.2)
+            config['dropout'] = random.uniform(0.1,0.25)
             
             # print out selected parameters
             print(f"n_head: {config['n_head']}, n_layer: {config['n_layer']}, n_embd: {config['n_embd']}, learning_rate: {learning_rate}, dropout: {config['dropout']}")
@@ -308,5 +308,5 @@ if __name__ == '__main__':
             print("")
             torch.cuda.empty_cache()
     
-    train(is_parameter_search=False)
-    # random_parameter_search()
+    # train(is_parameter_search=False)
+    random_parameter_search()

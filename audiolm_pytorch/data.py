@@ -196,11 +196,11 @@ class EncodecSoundDataset(Dataset):
         # class groups ()
         self.class_groups = {
             'tom': ['tom', 'conga', 'bongo'],
-            'kick': ['kick', 'bass', 'bassdrum', 'bd', 'bdrum'],
+            'kick': ['kick', 'bassdrum', 'bd', 'bdrum'], # 'bass',
             'snare': ['snare', 'rim', 'snap'],
             'hihat': ['hihat', 'hi-hat','hh', 'hat', 'cow', 'tamb', 'wood', 'ride', 'crash', 'crush', 'cymb', 'bell'],
             'clap': ['clap'],
-            'synth': ['syn'],
+            # 'synth': ['syn'],
             # 'perc': ['perc'],
         }
 

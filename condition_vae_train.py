@@ -1,3 +1,7 @@
+#
+# export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# for enabling deterministic behaviour of this script
+#
 
 from dataclasses import dataclass
 
@@ -37,7 +41,19 @@ batch_size = 512
 lr = 6e-4 # learning rate
 wd = 0.1 # weight decay
 betas = (0.9, 0.95) # adam betas
-dr = 0.65 # dropout rate
+dr = 0.3 # dropout rate
+
+# crop the time dimension to this length (150 -> input_crop)
+input_crop = 64
+
+# simple vae without convolutional layers
+# layers = [128, 64, 32, 16]
+
+# vae with convolutional layers
+channels = [128, 64, 64, 32]
+linears = [64, 8, 2]
+
+
 
 # get the audio dataset
 # ds_folders = ['/home/chris/data/audio_samples/ds_min/'] # for debugging
@@ -65,33 +81,17 @@ dsx = torch.stack(xp)
 dsy = torch.stack(yp)
 
 
+vae = ConditionConvVAE(channels, linears, input_crop).to(device)
 
 
-
-
-
-input_crop = 64
-
-# simple vae without convolutional layers
-# layers = [128, 64, 32, 16]
-
-# vae with convolutional layers
-channels = [128, 64, 64, 32]
-linears = [64, 8, 2]
-
-
-# va = ConditionVAE(layers, input_crop).to(device)
-va = ConditionConvVAE(channels, linears, input_crop).to(device)
-
-
-
-optimizer = torch.optim.AdamW(va.parameters(), lr=lr, weight_decay=wd, betas=betas)
+optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
 loss_fn = nn.MSELoss(reduction='sum')
 
 def loss_fn2(x, x_hat, mean, var, beta = 1.):
     normalization = x.shape[0]*x.shape[1]*x.shape[2]
 
     # weighting function for increasing the weight of the beginning of the sample
+    # idea would be envolope loss (adsr)
     weight = torch.zeros_like(x)
     for i in range(x.shape[1]):
         weight[:,i,:] = 1-(i/x.shape[1])**2
@@ -99,9 +99,6 @@ def loss_fn2(x, x_hat, mean, var, beta = 1.):
     weight = 1/weight.mean() * weight
     reproduction_loss = loss_fn(x_hat*weight, x*weight) / normalization
     kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
-    # kl_loss = 0
-
-
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
 
     # kl_loss += torch.mean(torch.abs(l-0.9)) * 0.0001
@@ -134,7 +131,7 @@ def print_param_stats(model):
             print('param: %s \t mean: %.6f \t std: %.6f' % (pn, p.mean().item(), p.std().item()))
 
 
-va.train()
+vae.train()
 
 train_losses = []
 val_losses = []
@@ -143,16 +140,16 @@ for i in range(num_passes):
     if i == int(num_passes * 0.8) or i == int(num_passes * 0.9):
         # change learning rate
         lr = lr * 0.2
-        optimizer = torch.optim.AdamW(va.parameters(), lr=lr, weight_decay=wd, betas=betas)
+        optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
         print('############################# new lr: %.8f' % lr)
         
         # print parameter stats
-        print_param_stats(va)
+        print_param_stats(vae)
 
 
     for dx, _, _, _ in dl_train:
         dx = dx.to(device)
-        x, x_hat, mean, var = va.forward(dx)
+        x, x_hat, mean, var = vae.forward(dx)
         rec_loss, kld_loss = loss_fn2(x, x_hat, mean, var)
         loss = rec_loss + kld_loss
         optimizer.zero_grad(set_to_none=True)
@@ -160,8 +157,8 @@ for i in range(num_passes):
         optimizer.step()
     
     if i % 10 == 0:
-        train_loss_rec, train_loss_kld = det_loss(va,ds_train)
-        val_loss_rec, val_loss_kld = det_loss(va,ds_val)
+        train_loss_rec, train_loss_kld = det_loss(vae,ds_train)
+        val_loss_rec, val_loss_kld = det_loss(vae,ds_val)
         train_losses.append([train_loss_rec, train_loss_kld])
         val_losses.append([val_loss_rec, val_loss_kld])
 
@@ -169,11 +166,11 @@ for i in range(num_passes):
             % (i,train_loss_rec+train_loss_kld, train_loss_rec, train_loss_kld, val_loss_rec+val_loss_kld, val_loss_rec, val_loss_kld))
         
         print('saving model of epoch %d' % i)
-        torch.save(va, 'results/vaes/vae2_%d.pt' % i)
+        torch.save(vae, 'results/vaes/vae3_%d.pt' % i)
 
 
 
-        va.eval()
+        vae.eval()
 
 
         # save losses plot
@@ -201,7 +198,7 @@ for i in range(num_passes):
         for i in range(len(classes)):
             samples_of_class = dsx[dsy==i]
             if len(samples_of_class) > 0:
-                outp_mean, outp_var  = va.forward(samples_of_class.to(device),encoder_only=True)    
+                outp_mean, outp_var  = vae.forward(samples_of_class.to(device),encoder_only=True)    
                 px = outp_mean.cpu().detach().numpy()
                 plt.scatter(px[:,0], px[:,1], label=classes[i], s=0.1, alpha=0.7)
 
@@ -221,7 +218,7 @@ for i in range(num_passes):
                 f, axarr = plt.subplots(1,2) 
 
                 cl_name = classes[i]
-                x, x_hat, x_mean, x_log_var = va.forward(samples_of_class.to(device))
+                x, x_hat, x_mean, x_log_var = vae.forward(samples_of_class.to(device))
                 xorig = x[0].cpu().detach().numpy()
                 xrec = x_hat[0].cpu().detach().numpy()
                 axarr[0].imshow(xorig)
@@ -236,7 +233,7 @@ for i in range(num_passes):
                 plt.savefig('results/vae_reconstruction_%s.png' % cl_name)
                 
 
-        va.train()
+        vae.train()
 
 
 
