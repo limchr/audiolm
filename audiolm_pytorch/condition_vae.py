@@ -85,22 +85,15 @@ class ConditionVAE(nn.Module):
         
         x = x.view([x.shape[0], -1] )
 
-
-
-
         mean, var = self.encoder(x)
         if encoder_only: return mean, var
         epsilon = torch.randn_like(var).to(device)        # sampling epsilon        
         z = mean + torch.exp(var / 2) * epsilon          # reparameterization trick
         x_hat = self.decoder(z)
         
-        
-        
         x = x.view([x.shape[0], self.input_crop, 128])
         x_hat = x_hat.view([x_hat.shape[0], self.input_crop, 128])
 
-
-        
         return input, x_hat, mean, var
 
 

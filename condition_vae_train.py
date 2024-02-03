@@ -24,7 +24,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 
-from experiment_config import ds_folders, ds_buffer
+from experiment_config import ds_folders, ds_buffer, ckpt_vae
 
 
 # we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
@@ -50,9 +50,8 @@ input_crop = 64
 # layers = [128, 64, 32, 16]
 
 # vae with convolutional layers
-channels = [128, 64, 64, 32]
-linears = [64, 8, 2]
-
+channels = [128,256,512,256]
+linears = [256, 128, 64, 2]
 
 
 # get the audio dataset
@@ -137,15 +136,6 @@ train_losses = []
 val_losses = []
 
 for i in range(num_passes):
-    if i == int(num_passes * 0.8) or i == int(num_passes * 0.9):
-        # change learning rate
-        lr = lr * 0.2
-        optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
-        print('############################# new lr: %.8f' % lr)
-        
-        # print parameter stats
-        print_param_stats(vae)
-
 
     for dx, _, _, _ in dl_train:
         dx = dx.to(device)
@@ -155,7 +145,17 @@ for i in range(num_passes):
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
-    
+
+    if i == int(num_passes * 0.6) or i == int(num_passes * 0.8):
+        # change learning rate
+        lr = lr * 0.2
+        optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
+        print('############################# new lr: %.8f' % lr)
+        
+        # print parameter stats
+        print_param_stats(vae)
+
+
     if i % 10 == 0:
         train_loss_rec, train_loss_kld = det_loss(vae,ds_train)
         val_loss_rec, val_loss_kld = det_loss(vae,ds_val)
@@ -165,8 +165,8 @@ for i in range(num_passes):
         print('pass: %d \t train loss: %.4f \t train rec loss: %.4f \t train kld loss: %.4f \t val loss: %.4f \t val rec loss: %.4f \t val kld loss: %.4f' 
             % (i,train_loss_rec+train_loss_kld, train_loss_rec, train_loss_kld, val_loss_rec+val_loss_kld, val_loss_rec, val_loss_kld))
         
-        print('saving model of epoch %d' % i)
-        torch.save(vae, 'results/vaes/vae3_%d.pt' % i)
+        # print('saving model of epoch %d' % i)
+        torch.save(vae, ckpt_vae)
 
 
 

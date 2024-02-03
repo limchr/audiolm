@@ -27,7 +27,7 @@ device = 'cuda'
 from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 300 # num passes through the dataset
+num_passes = 500 # num passes through the dataset
 
 learning_rate = 6e-4 # max learning rate
 weight_decay = 0.05
@@ -171,6 +171,17 @@ if __name__ == '__main__':
         condition_model = torch.load(ckpt_vae)
         condition_model.eval()
 
+        from audiolm_pytorch.discriminator import Discriminator
+        disc_channels = [128,256]
+        disc_linears = [256, 128, 64, 1]
+        disc_dropout = 0.15
+
+        discriminator_input_crop = 8
+        discriminator_model = Discriminator(disc_channels, disc_linears, 8, disc_dropout).to(device)
+        discriminator_model.train()
+        discriminator_optimizer = torch.optim.AdamW(discriminator_model.parameters(), lr=0.0001, weight_decay=0.05, betas=(0.9, 0.95))
+        discriminator_loss_fn = F.mse_loss
+
         # do not change
         best_val_loss = 1e9
         best_val_loss_iter = 0
@@ -190,28 +201,54 @@ if __name__ == '__main__':
             for dx, dy, _, _ in dl_train: # training is unsupervised so we don't need the labels (only shifted x)
                 dx = dx.to(device)
                 dy = dy.to(device)
+                
+                # condition model
                 condition_bottleneck = condition_model(dx,True)[0]
                 # rnds = torch.randn_like(condition_bottleneck).to(device) * 0.1
                 # condition_z = condition_bottleneck+rnds
-                condition_z = condition_bottleneck
+                condition_z = condition_bottleneck.detach()
 
-                # # debug plot for condition_z:
-                # cplt = condition_z.cpu().detach().numpy()
-                # plt.scatter(cplt[:,0],cplt[:,1], c=numeric_y.cpu().detach().numpy(), cmap='tab10')
-                # plt.savefig('results/condition_z.png')
-                
-                logits, loss = model.forward(dx,dy, condition_z)
-                loss.backward()
-                optimizer.step()
+                # autoregressive loss transformer training
                 optimizer.zero_grad(set_to_none=True)
-                # if i % 100 == 0: print(loss.item()) # print more losses for debugging
-            
-            # if i%2 == 0 and i != 0:
-            #     learning_rate = learning_rate * 5
-            #     print('changed learning rate to %.3e at pass %d' % (learning_rate, i))
-            #     optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=learning_rate,betas=(beta1, beta2),device_type=device)
-            
-            
+                _, gen_loss_autoreg = model.forward(dx,dy, condition_z)
+                gen_loss_autoreg.backward()
+                optimizer.step()
+                
+                if True: # train in a GAN setup
+                    discriminator_optimizer.zero_grad(set_to_none=True)
+                    
+                    # discriminator on real data
+                    label = torch.ones(dx.shape[0]).to(device)
+                    disc_p = discriminator_model.forward(dx,softmax=False)
+                    disc_loss_real = discriminator_loss_fn(disc_p.squeeze(), label)
+                    disc_loss_real.backward()
+                    D_x = disc_p.mean().item()
+                    
+                    # discriminator on fake data
+                    gx = model.generate(discriminator_input_crop-1, condition_z)
+                    label = label.fill_(0)
+                    disc_p = discriminator_model.forward(gx.detach(),softmax=False)
+                    disc_loss_fake = discriminator_loss_fn(disc_p.squeeze(), label)
+                    disc_loss_fake.backward()
+                    D_G_z1 = disc_p.mean().item()
+                    
+                    # discriminator loss and optimization
+                    disc_loss = disc_loss_real + disc_loss_fake
+                    discriminator_optimizer.step()
+                    
+                    # generator loss and optimization
+                    optimizer.zero_grad()
+                    label = label.fill_(1)
+                    disc_p = discriminator_model.forward(gx,softmax=False)
+                    gen_loss = discriminator_loss_fn(disc_p.squeeze(), label)
+                    gen_loss.backward()
+                    D_G_z2 = disc_p.mean().item()
+                    optimizer.step()
+                    print('D_x: %.5f\tD_G_z1: %.5f\tD_G_z2: %.5f' % (D_x, D_G_z1, D_G_z2))
+
+                    
+
+
             # change learning rate at several points during training
             if i > int(num_passes*0.9):
                 change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6 * 0.6
@@ -260,7 +297,7 @@ if __name__ == '__main__':
                     # plt.show()
                     
                 # early stopping
-                if i > best_val_loss_iter + 30:
+                if is_parameter_search and i > best_val_loss_iter + 30:
                     print('early stopping at pass %d' % i)
                     break
                 
@@ -308,5 +345,5 @@ if __name__ == '__main__':
             print("")
             torch.cuda.empty_cache()
     
-    # train(is_parameter_search=False)
-    random_parameter_search()
+    train(is_parameter_search=False)
+    # random_parameter_search()
