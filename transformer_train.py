@@ -176,8 +176,8 @@ if __name__ == '__main__':
         disc_linears = [256, 128, 64, 1]
         disc_dropout = 0.15
 
-        discriminator_input_crop = 8
-        discriminator_model = Discriminator(disc_channels, disc_linears, 8, disc_dropout).to(device)
+        discriminator_input_crop = 16
+        discriminator_model = Discriminator(disc_channels, disc_linears, discriminator_input_crop, disc_dropout).to(device)
         discriminator_model.train()
         discriminator_optimizer = torch.optim.AdamW(discriminator_model.parameters(), lr=0.0001, weight_decay=0.05, betas=(0.9, 0.95))
         discriminator_loss_fn = F.mse_loss
@@ -214,7 +214,7 @@ if __name__ == '__main__':
                 gen_loss_autoreg.backward()
                 optimizer.step()
                 
-                if True: # train in a GAN setup
+                if False: # train in a GAN setup
                     discriminator_optimizer.zero_grad(set_to_none=True)
                     
                     # discriminator on real data
