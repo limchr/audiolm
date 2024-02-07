@@ -28,7 +28,9 @@ from experiment_config import ds_folders, ds_buffer, ckpt_vae
 
 
 # we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
-seed = 1236
+seed = 1237
+data_seed = 1234
+
 torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
@@ -41,7 +43,7 @@ batch_size = 512
 lr = 6e-4 # learning rate
 wd = 0.1 # weight decay
 betas = (0.9, 0.95) # adam betas
-dr = 0.3 # dropout rate
+dr = 0.0 # dropout rate
 
 # crop the time dimension to this length (150 -> input_crop)
 input_crop = 64
@@ -50,8 +52,8 @@ input_crop = 64
 # layers = [128, 64, 32, 16]
 
 # vae with convolutional layers
-channels = [128,256,512,256]
-linears = [256, 128, 64, 2]
+channels = [128,128,256,128]
+linears = [128, 128, 64, 2]
 
 
 # get the audio dataset
@@ -61,11 +63,14 @@ dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_
                                                                 dump_path= ds_buffer,
                                                                 build_dump_from_scratch=False,
                                                                 only_labeled_samples=True,
-                                                                test_size=0.2,
+                                                                test_size=0.1,
                                                                 equalize_class_distribution=True,
                                                                 equalize_train_data_loader_distribution=True,
                                                                 batch_size=batch_size,
-                                                                seed=seed)
+                                                                seed=data_seed)
+# check for train test split random correctness
+print(ds_train[123][3], ds_train[245][3], ds_val[456][3], ds_val[125][3])
+
 
 
 #
@@ -88,19 +93,25 @@ loss_fn = nn.MSELoss(reduction='sum')
 
 def loss_fn2(x, x_hat, mean, var, beta = 1.):
     normalization = x.shape[0]*x.shape[1]*x.shape[2]
+    reproduction_loss = None
+    if False:
+        # weighting function for increasing the weight of the beginning of the sample
+        # idea would be envolope loss (adsr)
+        weight = torch.zeros_like(x)
+        for i in range(x.shape[1]):
+            weight[:,i,:] = 1-(i/x.shape[1])**2
+        weight = 1/weight.mean() * weight
+        reproduction_loss = loss_fn(x_hat*weight, x*weight) / normalization
+    else:
+        reproduction_loss = loss_fn(x_hat, x) / normalization
 
-    # weighting function for increasing the weight of the beginning of the sample
-    # idea would be envolope loss (adsr)
-    weight = torch.zeros_like(x)
-    for i in range(x.shape[1]):
-        weight[:,i,:] = 1-(i/x.shape[1])**2
-
-    weight = 1/weight.mean() * weight
-    reproduction_loss = loss_fn(x_hat*weight, x*weight) / normalization
     kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
 
-    # kl_loss += torch.mean(torch.abs(l-0.9)) * 0.0001
+
+    scalar = torch.FloatTensor([0.0]).to(device)
+    kl_loss += torch.max((l-1.0),scalar.expand_as(l)).mean() * 0.1
+    # kl_loss += torch.mean(torch.abs(l-0.8)) * 0.001
     # loss = (l*0.35)**32
 
     li = reproduction_loss.item()

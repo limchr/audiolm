@@ -315,7 +315,7 @@ class EncodecSoundDataset(Dataset):
         except:
             print('error loading file '+file)
             data, sample_hz = torch.zeros((1,20000)), 24000 # todo: this is a hack to make it work with the sampler
-            self.faulty_files.append(file)
+            self.log_faulty_files.append(file)
             
 
         assert data.numel() > 0, f'one of your audio file ({file}) is empty. please remove it from your folder'

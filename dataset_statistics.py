@@ -19,14 +19,14 @@ random.seed(seed)
 np.random.seed(seed)
 
 
-ds = data.EncodecSoundDataset(folders=ec.ds_folders, length=2, seed=seed)
+ds = data.EncodecSoundDataset(folders=ec.ds_folders, length=2, seed=seed, device='cpu')
 dsb = data.BufferedDataset(ds, ec.ds_buffer, True)
 
 
 print('faulty files:')
 for f in ds.log_faulty_files: 
     print(f)
-    # os.rename(f, f + '_faulty')
+    os.rename(f, f + '_faulty')
 
 print('no label: %i files (%.2f%%)' % (len(ds.log_no_label),100 * len(ds.log_no_label) / len(ds)))
 

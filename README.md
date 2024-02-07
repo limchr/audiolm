@@ -30,3 +30,23 @@ Installation with conda / pip:
 ## Interesting Links
 
 - https://medium.com/analytics-vidhya/understanding-the-mel-spectrogram-fca2afa2ce53
+
+## Notes and ideas for the future
+
+### visualization ideas
+- 2,5d: extend the 2d idea with a slider next to the visualization for changing the z-direction. Changing the slider value could also change the calculated color distribution and the slider color could represent which classes are present at a specific z coordinate
+- 4d: two 2d plots next to each other for selecting 4d point. Problem: User could select hihat in one and kick in the other plot. Weired results? Maybe a training of "mixed samples" is possible for compensate this?
+- timbre map: 2d map with timbre on one axis and pitch on the other axis
+
+### Things might worth to try out
+
+- implement stop token for data class (variable length sequences)
+- decoder only transformer? condition concatenated to dx
+- get GAN training paradigm to work
+
+### Other ToDos
+- auditive check input samples and confirm the extracted class
+- parameter random search for VAE
+
+- style transfer, style gan ideas might be interesting
+

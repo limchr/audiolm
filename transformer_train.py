@@ -29,7 +29,7 @@ ds_from_scratch = False # create data set dump from scratch (set True if data se
 
 num_passes = 500 # num passes through the dataset
 
-learning_rate = 6e-4 # max learning rate
+learning_rate = 1e-4 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
@@ -37,52 +37,49 @@ batch_size = 128
 
 seed = 1234
 
-
-# visualization ideas
-# 2d only: export training points and classify each background-image pixel with nearest neighbor classifier for visualizing the class distribution on a html canvas element for the user to select a 2d point with the mouse
-# 2,5d: extend the 2d idea with a slider next to the visualization for changing the z-direction. Changing the slider value could also change the calculated color distribution and the slider color could represent which classes are present at a specific z coordinate
-# 4d: two 2d plots next to each other for selecting 4d point. Problem: User could select hihat in one and kick in the other plot. Weired results? Maybe a training of "mixed samples" is possible for compensate this?
-
-
-# implement stop token for data class (variable length sequences)
-
-# generate a sample map by choosing from the 2d embedding a real sample (by nearest neighbor) for checking if the 2d embedding actually has a meaningful representation of the samples
-# distance between generated and related real sample
-# embedding with 64 time shape, 1D convolutions in time dimension like in encodec paper
-# vae loss that cares more about the first time steps (because they are more important for the sound)
-# gan architecture
-# Randomizing generation in transformer for more variety (not most probable sample is taken but randomly from best 5 or so)
-# consider quantized output of encodec model (one torch embedding for each index dimension)
-# decoder only?
-
-# mehr samples anhoeren und auch label checken
-# try out fixed randomness for training vae
-# limit 2d embedding to fixed rectangle, train transformer regarding this rectangle
-
-# style transfer, style gan paper nochmal lesen
-# 2d embedding: 2d embedding with 64 time shape
-# evaluation metrices:
-
-# loss
-# user listening tests (which sounds better?)
-# generate audio for all the 2d points of the training data and compare with the original audio embedding. How accurate is it? For in between points, how similar is it to nearby points? We want to have a novelty factor in the generated audio, but it should still be similar to the original audio
-
+stats_every_iteration = 10
+train_set_testing_size = 1000
+is_gan_training = False
 
 torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
 
-
+# # full big model
 config = dict(
     block_size = 150,
     block_size_condition = 2,
     vocab_size = 128,
-    n_layer = 14,
-    n_head = 8,
-    n_embd = 440,
+    n_layer = 20,#14
+    n_head = 14,
+    n_embd = 420,
     dropout = 0.15,
     bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 )
+
+
+
+
+is_debug = False
+if is_debug:
+    from_scratch = True
+    stats_every_iteration = 1
+    is_gan_training = False
+
+    # smaller debug model
+    config = dict(
+        block_size = 150,
+        block_size_condition = 2,
+        vocab_size = 128,
+        n_layer = 4,
+        n_head = 4,
+        n_embd = 220,
+        dropout = 0.15,
+        bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    )
+
+
+
 
 def load_model(ckpt_path):
     global config
@@ -126,11 +123,13 @@ if __name__ == '__main__':
                                                                     dump_path= ds_buffer,
                                                                     build_dump_from_scratch=ds_from_scratch,
                                                                     only_labeled_samples=True,
-                                                                    test_size=0.2,
+                                                                    test_size=0.1,
                                                                     equalize_class_distribution=True,
                                                                     equalize_train_data_loader_distribution=True,
                                                                     batch_size=batch_size,
                                                                     seed=seed)
+    # check for train test split random correctness
+    print(ds_train[123][3], ds_train[245][3], ds_val[456][3], ds_val[125][3])
 
     # calculate loss of model for a given dataset (executed during training)
     @torch.no_grad()
@@ -138,19 +137,45 @@ if __name__ == '__main__':
         dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # get new dataloader because we want random sampling here!
         model.eval()
         losses = []
+        gen_losses = []
         for dx, dy, _, _ in dl:
-            dx = dx.to(device)
-            dy = dy.to(device)
-            condition_bottleneck = condition_model(dx,True)[0]
+            dx = dx.to(device).detach()
+            dy = dy.to(device).detach()
+            condition_bottleneck = condition_model(dx,True)[0].detach()
             _, loss = model.forward(dx,dy, condition_bottleneck)
             losses.append(loss.cpu().detach().item())    
+            
+            # calculate generative loss
+            gx = model.generate(num_generate=149, condition=condition_bottleneck)
+            mae_trans = torch.mean(torch.abs(dx[:,:64,:] - gx[:,:64,:])).item()
+            gen_losses.append(mae_trans)
         model.train()
-        return np.mean(losses)
+        return np.mean(losses), np.mean(gen_losses)
 
 
     def train(is_parameter_search):
         # load model
         # training from scratch
+        
+        # do not change
+        best_val_loss = 1e9
+        best_val_loss_iter = 0
+        best_train_loss = 1e9
+        best_train_loss_iter = 0
+        best_train_gen_loss = 1e9
+        best_train_gen_loss_iter = 0
+        best_val_gen_loss = 1e9
+        best_val_gen_loss_iter = 0
+
+        train_losses = []
+        val_losses = []
+        train_gen_losses = []
+        val_gen_losses = []
+        change_learning_rate = learning_rate
+        actual_learning_rate = learning_rate
+
+
+        
         start_iter = 0
         if from_scratch:
             model = gpt.ConditionedGPT(config)
@@ -162,7 +187,7 @@ if __name__ == '__main__':
             ckpt_path = ckpt_transformer
             model, checkpoint = load_model(ckpt_path)
             start_iter = checkpoint['iter_num']
-            best_val_loss = checkpoint['best_val_loss']
+            best_val_gen_loss = checkpoint['best_val_loss']
 
 
 
@@ -176,37 +201,28 @@ if __name__ == '__main__':
         disc_linears = [256, 128, 64, 1]
         disc_dropout = 0.15
 
-        discriminator_input_crop = 16
-        discriminator_model = Discriminator(disc_channels, disc_linears, discriminator_input_crop, disc_dropout).to(device)
-        discriminator_model.train()
-        discriminator_optimizer = torch.optim.AdamW(discriminator_model.parameters(), lr=0.0001, weight_decay=0.05, betas=(0.9, 0.95))
-        discriminator_loss_fn = F.mse_loss
-
-        # do not change
-        best_val_loss = 1e9
-        best_val_loss_iter = 0
-        best_train_loss = 1e9
-        best_train_loss_iter = 0
-
-        train_losses = []
-        val_losses = []
-        change_learning_rate = learning_rate
-        actual_learning_rate = learning_rate
+        if is_gan_training:
+            discriminator_input_crop = 150
+            discriminator_model = Discriminator(disc_channels, disc_linears, discriminator_input_crop, disc_dropout).to(device)
+            discriminator_model.train()
+            discriminator_optimizer = torch.optim.AdamW(discriminator_model.parameters(), lr=0.0001, weight_decay=0.05, betas=(0.9, 0.95))
+            discriminator_loss_fn = F.mse_loss
 
 
         model.train()
         iteration = 0
         for i in range(start_iter,num_passes):
             iteration = i
+            print('start iteration %d' % i)
             for dx, dy, _, _ in dl_train: # training is unsupervised so we don't need the labels (only shifted x)
-                dx = dx.to(device)
-                dy = dy.to(device)
+                dx = dx.to(device).detach()
+                dy = dy.to(device).detach()
                 
                 # condition model
-                condition_bottleneck = condition_model(dx,True)[0]
+                condition_bottleneck = condition_model(dx,True)[0].detach()
                 # rnds = torch.randn_like(condition_bottleneck).to(device) * 0.1
                 # condition_z = condition_bottleneck+rnds
-                condition_z = condition_bottleneck.detach()
+                condition_z = condition_bottleneck
 
                 # autoregressive loss transformer training
                 optimizer.zero_grad(set_to_none=True)
@@ -214,7 +230,7 @@ if __name__ == '__main__':
                 gen_loss_autoreg.backward()
                 optimizer.step()
                 
-                if False: # train in a GAN setup
+                if is_gan_training: # train in a GAN setup
                     discriminator_optimizer.zero_grad(set_to_none=True)
                     
                     # discriminator on real data
@@ -225,9 +241,17 @@ if __name__ == '__main__':
                     D_x = disc_p.mean().item()
                     
                     # discriminator on fake data
-                    gx = model.generate(discriminator_input_crop-1, condition_z)
+                    gx = model.generate(discriminator_input_crop-1, condition_z).detach()
+
+                    # this is used in the generator loss
+                    gx_target = gx
+                    gx = torch.cat((gx[:,:-1,:], torch.zeros((dx.shape[0],1,128)).to(device)),dim=1)
+                    pred_gx, _ = model.forward(gx, gx_target, condition_z)
+
+
+
                     label = label.fill_(0)
-                    disc_p = discriminator_model.forward(gx.detach(),softmax=False)
+                    disc_p = discriminator_model.forward(pred_gx,softmax=False)
                     disc_loss_fake = discriminator_loss_fn(disc_p.squeeze(), label)
                     disc_loss_fake.backward()
                     D_G_z1 = disc_p.mean().item()
@@ -239,16 +263,22 @@ if __name__ == '__main__':
                     # generator loss and optimization
                     optimizer.zero_grad()
                     label = label.fill_(1)
-                    disc_p = discriminator_model.forward(gx,softmax=False)
+
+                    # copy from above
+                    gx_target = gx
+                    gx = torch.cat((gx[:,:-1,:], torch.zeros((dx.shape[0],1,128)).to(device)),dim=1)
+                    pred_gx, _ = model.forward(gx, gx_target, condition_z)
+
+
+                    disc_p = discriminator_model.forward(pred_gx,softmax=False)
                     gen_loss = discriminator_loss_fn(disc_p.squeeze(), label)
                     gen_loss.backward()
                     D_G_z2 = disc_p.mean().item()
                     optimizer.step()
                     print('D_x: %.5f\tD_G_z1: %.5f\tD_G_z2: %.5f' % (D_x, D_G_z1, D_G_z2))
+            print('iteration %d done' % i)
 
                     
-
-
             # change learning rate at several points during training
             if i > int(num_passes*0.9):
                 change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6 * 0.6
@@ -266,25 +296,47 @@ if __name__ == '__main__':
                 if not is_parameter_search:
                     print('changed learning rate to %.3e at pass %d' % (change_learning_rate, i))
 
+
             # plot training stats
-            if i % 3 == 0:
-                train_loss = det_loss_testing(ds_train, model, condition_model)
-                val_loss = det_loss_testing(ds_val, model, condition_model)
+            if i % stats_every_iteration == 0:
+                print('calculating losses at iteration %d' % i)
+                train_loss, train_gen_loss = det_loss_testing(torch.utils.data.Subset(ds_train,list(range(0,train_set_testing_size))), model, condition_model)
+                val_loss, val_gen_loss = det_loss_testing(ds_val, model, condition_model)
+                
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
+                train_gen_losses.append(train_gen_loss)
+                val_gen_losses.append(val_gen_loss)
+                
+
+                if i > 0: 
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_val_loss_iter = i
+                        # if not is_parameter_search:
+                        #     print('saving model to %s with val loss %.5f' % (ckpt_transformer, best_val_loss))
+                        #     save_model(ckpt_transformer, model, optimizer, i, best_val_loss, config)
+                    if train_loss < best_train_loss:
+                        best_train_loss = train_loss
+                        best_train_loss_iter = i
+                    if val_gen_loss < best_val_gen_loss:
+                        best_val_gen_loss = val_gen_loss
+                        best_val_gen_loss_iter = i
+                        if not is_parameter_search:
+                            print('saving model to %s with val MAE loss %.5f' % (ckpt_transformer, best_val_gen_loss))
+                            save_model(ckpt_transformer, model, optimizer, i, best_val_gen_loss, config)
+
+                    if train_gen_loss < best_train_gen_loss:
+                        best_train_gen_loss = train_gen_loss
+                        best_train_gen_loss_iter = i
+
                 if not is_parameter_search:
-                    print('%d/%d\ttrain loss: %.5f\tval loss: %.5f \tbest train loss: %.5f \tbest val loss: %.5f (epoch %i)' % (i, num_passes, train_loss, val_loss, best_train_loss, best_val_loss, best_val_loss_iter))
-
-                if i > 0 and val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_val_loss_iter = i
-                    if not is_parameter_search:
-                        print('saving model to %s with val loss %.5f' % (ckpt_transformer, best_val_loss))
-                        save_model(ckpt_transformer, model, optimizer, i, best_val_loss, config)
-                if i > 0 and train_loss < best_train_loss:
-                    best_train_loss = train_loss
-                    best_train_loss_iter = i
-
+                    print("##### iteration %d/%d" % (i, num_passes))
+                    print('train loss: %.5f (best train loss: %.5f at iter %i)' % (train_loss, best_train_loss, best_train_loss_iter))
+                    print('train MAE loss: %.5f (best train MAE loss: %.5f at iter %i)' % (train_gen_loss, best_train_gen_loss, best_train_gen_loss_iter))
+                    print('test loss: %.5f (best test loss: %.5f at iter %i)' % (val_loss, best_val_loss, best_val_loss_iter))
+                    print('test MAE loss: %.5f (best test MAE loss: %.5f at iter %i)' % (val_gen_loss, best_val_gen_loss, best_val_gen_loss_iter))
+                    print('')
                     
                 if not is_parameter_search:    
                     # save losses plot

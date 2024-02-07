@@ -16,9 +16,10 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 import matplotlib
+import matplotlib.patches as mpatches
 
 from transformer_train import load_model
-from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer
+from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer, ckpt_discriminator
 
 import os
 import shutil
@@ -27,7 +28,7 @@ outdir = 'results/samples'
 
 device = 'cuda'
 seed = 1234
-ns = 60 # number of samples for x and y (total samples = ns*ns)
+ns = 20 # number of samples for x and y (total samples = ns*ns)
 num_generate = 150
 num_sample_points_export = 3000
 
@@ -56,7 +57,8 @@ config = model.config
 condition_model = torch.load(ckpt_vae)
 condition_model.eval()
 
-
+discriminator = torch.load(ckpt_discriminator)
+discriminator.eval()
 
 
 
@@ -65,11 +67,13 @@ dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_
                                                                 dump_path= ds_buffer,
                                                                 build_dump_from_scratch=False,
                                                                 only_labeled_samples=True,
-                                                                test_size=0.2,
+                                                                test_size=0.1,
                                                                 equalize_class_distribution=True,
                                                                 equalize_train_data_loader_distribution=True,
                                                                 batch_size=512,
                                                                 seed=seed)
+# check for train test split random correctness
+print(ds_train[123][3], ds_train[245][3], ds_val[456][3], ds_val[125][3])
 
 
 
@@ -103,6 +107,12 @@ zy_combined = zy_combined[np.random.choice(zy_combined.shape[0], num_sample_poin
 np.savetxt('results/zy.csv', zy_combined, delimiter=',', newline='\n', fmt='%.6f')
 
 
+def classify(x):
+    softmax = discriminator(x,True)[0]
+    argsort = torch.argsort(softmax)
+    margin = (softmax[argsort[-1]]-softmax[argsort[-2]]).item()
+    class_id = argsort[-1].item()
+    return class_id, margin
 
 
 #
@@ -116,25 +126,97 @@ for xi,x in enumerate(sampling_x):
     generated = []
     for yi,y in enumerate(sampling_y):
         gx = None
-        # gx = model.generate(num_generate=num_generate-1, condition=[[x,y]])
+        gx = model.generate(num_generate=num_generate-1, condition=[[x,y]])
 
         vae_gx = condition_model.decoder(torch.tensor([[x,y]],dtype=torch.float).to(device))
         vae_gx = vae_gx.swapaxes(1,2)
 
         sort_i = np.argsort(np.linalg.norm(bottlenecks - np.array([x,y],dtype=np.float32), axis=1))[:nneighbors]
-        nn_gx = torch.zeros((1,150,128)).to('cpu')
+        nn_gx = torch.zeros((1,150,128)).to(device)
         for i in sort_i:
-            dx = ds_train[i][0]
-            nn_gx += dx
+            dxn = ds_train[i][0].to(device)
+            nn_gx += dxn
         nn_gx /= nneighbors
 
-        generated.append({'transformer': gx, 'vae': vae_gx, 'nn': nn_gx})
+        p_transformer = classify(gx)
+        p_vae = classify(vae_gx)
+        p_nn = classify(nn_gx)
+
+
+        generated.append({'transformer': gx, 'vae': vae_gx, 'nn': nn_gx, 'classifications': {'transformer': p_transformer, 'vae': p_vae, 'nn': p_nn}})
 
         print('generated %d/%d' % (xi*ns+yi, ns*ns))
         if True:
             wav = dsb.dataset.dataset.decode_sample(nn_gx.to('cpu'))
             dsb.dataset.dataset.save_audio(wav, f'results/samples/generated_%05d_%05d.wav' % (xi,yi))
     generated_map.append(generated)
+
+
+classes = ds_train.ds.classes
+
+
+plt.close()
+# Define the figure and subplot grid
+fig, axs = plt.subplots(2, 3, figsize=(1, 1))
+
+models = ['transformer', 'vae', 'nn']
+
+
+# Loop through each subplot
+for i in range(3): # models
+    for j in range(2): # 0 for predicted classes, 1 for margin
+        # Create an image for the subplot
+        img = np.zeros((ns, ns), dtype=np.int32 if j == 0 else np.float32)
+        for xx in range(ns):
+            for yy in range(ns):
+                img[xx, yy] = generated_map[xx][yy]['classifications'][models[i]][j]
+
+        # Plot the image on the current subplot
+        im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays' if j == 1 else 'tab20')
+
+        if j==0:
+            # Get the colors of the values, according to the colormap used by imshow
+            colors = [im.cmap(im.norm(value)) for value in range(len(classes))]
+
+            # Create a patch (proxy artist) for every color
+            patches = [matplotlib.patches.Patch(color=colors[k], label=classes[k]) for k in range(len(classes))]
+
+            # Put those patched as legend-handles into the legend
+            # axs[j, i].legend(handles=patches, borderaxespad=0., loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=len(classes)//2)
+
+            axs.flat[i].set_title(models[i])
+
+
+
+
+        axs[j, i].grid(True, which='both', axis='both', linestyle='--', color='k', linewidth=1)
+        axs[j, i].set_xticks(np.arange(0, ns, 1) + 0.5)
+        axs[j, i].set_yticks(np.arange(0, ns, 1) + 0.5)
+        axs[j, i].tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
+                              labelbottom=False, labelleft=False)
+
+# Create a single legend outside of the subplots
+plt.legend(handles=patches, loc='lower center', bbox_to_anchor=(-0.5, 1.0), ncol=len(classes))
+plt.gcf().set_size_inches(20, 10)
+
+
+# Show the plot
+plt.tight_layout()
+plt.savefig('results/classification_map.png')
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+ 
 
 
 
@@ -146,7 +228,6 @@ print('For integrating the new data into the web app, do the following:')
 print('copy zy.csv to the web app folder: cp /home/chris/src/audiolm/results/zy.csv /home/chris/src/audiogen_demo/data/models/drums/zy.csv')
 print('remove the old sample files: rm /home/chris/src/audiogen_demo/data/models/drums/samples/ -r')
 print('move new generated samples to the folder: mv /home/chris/src/audiolm/results/samples /home/chris/src/audiogen_demo/data/models/drums/')
-
 print('add classes to the web app:')
 class_str = ''
 for i in range(len(dsb.dataset.dataset.classes)):

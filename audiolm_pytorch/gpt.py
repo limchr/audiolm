@@ -255,6 +255,13 @@ class ConditionedGPT(nn.Module):
         b, t, f = tok_emb.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
 
+
+        # set the condition also as starting token for the decoder
+        tok_emb[:,0,:64] = condition[:,0].unsqueeze(1).repeat(1,64)
+        tok_emb[:,0,64:] = condition[:,1].unsqueeze(1).repeat(1,64)
+        
+
+
         # condition[:] = 0.0
         # cond2 = self.transformer.cond_bn2(tok_emb)
         # combined_condition = torch.cat((condition,cond2),dim=1)
@@ -407,6 +414,7 @@ class ConditionedGPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+    @torch.no_grad()
     def generate(self, num_generate, condition):
         device = next(self.parameters()).device
         
@@ -419,4 +427,33 @@ class ConditionedGPT(nn.Module):
         for _ in range(num_generate):
             ng = self.forward(gx, None, condition)[0]
             gx = torch.cat((gx, ng), dim=1)
+            # gx = gx.detach()
         return gx
+    
+    def generate_train(self, num_generate, condition, targets, accumulate_grad_steps):
+        device = next(self.parameters()).device
+        
+        if not torch.is_tensor(condition):
+            condition = torch.tensor(condition, dtype=torch.float32).to(device=device) # 2d condition
+        
+        gx = torch.zeros((condition.shape[0], num_generate, self.config.vocab_size), dtype=torch.float32).to(device) # all zeros is the 'start token'
+        
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.00001)
+        loss_fn = torch.nn.MSELoss()
+        
+        for _ in range(num_generate // accumulate_grad_steps):
+            optimizer.zero_grad()
+            for _ in range(accumulate_grad_steps):
+                ng = self.forward(gx, None, condition)
+                gx[:, _*accumulate_grad_steps:(_+1)*accumulate_grad_steps, :] = ng[:, _*accumulate_grad_steps:(_+1)*accumulate_grad_steps, :]
+
+            logits = gx[:, 1:] # Remove the 'start token'
+            targets = gx[:, 1:].argmax(dim=-1) # Assuming you're using cross-entropy loss
+            loss = loss_fn(logits.view(-1, self.config.vocab_size), targets.view(-1))
+            loss.backward()
+            optimizer.step()
+
+        return gx
+    
+    
+    
