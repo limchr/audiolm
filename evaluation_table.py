@@ -28,6 +28,7 @@ device = 'cuda'
 seed = 1234
 num_generate = 150
 nneighbors = 5
+batch_size = 128
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
 
 torch.manual_seed(seed)
@@ -38,6 +39,7 @@ np.random.seed(seed)
 
 model, checkpoint = load_model(ckpt_transformer)
 config = model.config
+model.eval()
 
 condition_model = torch.load(ckpt_vae)
 condition_model.eval()
@@ -55,7 +57,7 @@ dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_
                                                                 test_size=0.1,
                                                                 equalize_class_distribution=True,
                                                                 equalize_train_data_loader_distribution=True,
-                                                                batch_size=512,
+                                                                batch_size=batch_size,
                                                                 seed=seed)
 # check for train test split random correctness
 print(ds_train[123][3], ds_train[245][3], ds_val[456][3], ds_val[125][3])
@@ -76,8 +78,9 @@ numeric_classes = np.array(numeric_classes, dtype=np.int32)
 
 
 def get_maes(ds):
-    for d in ds:
-        dx = d[0].unsqueeze(0).to(device=device)
+    dl = DataLoader(ds, batch_size=batch_size, shuffle=False)
+    for d in dl:
+        dx = d[0].to(device=device)
 
         # calculate latent
         condition_bottleneck = condition_model(dx,True)[0]
@@ -89,19 +92,23 @@ def get_maes(ds):
         vae_gx = condition_model.decoder(condition_bottleneck)
         vae_gx = vae_gx.swapaxes(1,2)
 
-        sort_i = np.argsort(np.linalg.norm(bottlenecks - condition_bottleneck[0,:].cpu().detach().numpy(), axis=1))[:nneighbors]
-        nn_gx = torch.zeros((1,150,128)).to(device)
-        for i in sort_i:
-            dxn = ds_train[i][0].to(device) # always train set for nn model
-            nn_gx += dxn
-        nn_gx /= nneighbors
+        nn_gx = torch.zeros((dx.shape[0],150,128)).to(device)
+
+        for bi in range(dx.shape[0]):
+            sort_i = np.argsort(np.linalg.norm(bottlenecks - condition_bottleneck[bi,:].cpu().detach().numpy(), axis=1))[:nneighbors]
+            averagenn = torch.zeros((1,150,128)).to(device)
+            for i in sort_i:
+                dxn = ds_train[i][0].to(device) # always train set for nn model
+                averagenn += dxn
+            averagenn /= nneighbors
+            nn_gx[bi,:,:] = averagenn
 
         # cropping because VAE has crop, to make a fair comparison
         cropt = 64
 
-        mae_trans = torch.mean(torch.abs(dx[0,:cropt,:] - gx[0,:cropt,:])).item()
-        mae_vae = torch.mean(torch.abs(dx[0,:cropt,:] - vae_gx[0,:cropt,:])).item()
-        mae_nn = torch.mean(torch.abs(dx[0,:cropt,:] - nn_gx[0,:cropt,:])).item()
+        mae_trans = torch.mean(torch.abs(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
+        mae_vae = torch.mean(torch.abs(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
+        mae_nn = torch.mean(torch.abs(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
 
         # use classifier for MAE of posterior probabilities
         

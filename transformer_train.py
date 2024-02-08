@@ -24,21 +24,21 @@ from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer
 
 
 device = 'cuda'
-from_scratch = True # train model from scratch, otherwise load from checkpoint
+from_scratch = False # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 
-num_passes = 500 # num passes through the dataset
+num_passes = 300 # num passes through the dataset
 
-learning_rate = 1e-4 # max learning rate
+learning_rate = 3e-5 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
-batch_size = 128
+batch_size = 100
 
 seed = 1234
 
 stats_every_iteration = 10
-train_set_testing_size = 1000
+train_set_testing_size = 2000
 is_gan_training = False
 
 torch.manual_seed(seed)
@@ -54,13 +54,13 @@ config = dict(
     n_head = 14,
     n_embd = 420,
     dropout = 0.15,
-    bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    bias = True
 )
 
 
 
 
-is_debug = False
+is_debug = True
 if is_debug:
     from_scratch = True
     stats_every_iteration = 1
@@ -71,10 +71,10 @@ if is_debug:
         block_size = 150,
         block_size_condition = 2,
         vocab_size = 128,
-        n_layer = 4,
-        n_head = 4,
+        n_layer = 6,
+        n_head = 1,
         n_embd = 220,
-        dropout = 0.15,
+        dropout = 0.10,
         bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     )
 
