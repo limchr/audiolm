@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-
+import math
 import random
 import numpy as np
 
@@ -13,7 +13,8 @@ class Discriminator(nn.Module):
     def __init__(self, channels, linears, input_crop, dropout):
         super(Discriminator, self).__init__()
 
-        intermediate_output_size = int(input_crop / 2**(len(channels)-1)) * channels[-1]
+        intermediate_output_size = math.ceil(input_crop / 2**(len(channels)-1)) * channels[-1]
+        conv_sizes = [input_crop,] + [math.ceil(input_crop / 2**(i+1)) for i in range(len(channels)-1)]
         linears = [intermediate_output_size,] + linears
         print("creating discriminator with linears", linears)
         
@@ -21,7 +22,7 @@ class Discriminator(nn.Module):
             setattr(self, 'conv{}'.format(i), nn.Conv1d(
                 channels[i], channels[i+1], kernel_size=5, stride=2, padding=2
             ))
-            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([channels[i+1], input_crop // 2**(i+1)]))
+            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([channels[i+1], conv_sizes[i+1]]))
         
         for i in range(len(linears)-2):
             setattr(self, 'fc{}'.format(i), nn.Linear(

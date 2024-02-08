@@ -28,13 +28,13 @@ from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 only_labeled_samples=True
 
-num_passes = 600 # num passes through the dataset
+num_passes = 300 # num passes through the dataset
 
 learning_rate = 3e-5 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
-batch_size = 100
+batch_size = 128
 
 seed = 1234
 
@@ -51,9 +51,9 @@ config = dict(
     block_size = 150,
     block_size_condition = 2,
     vocab_size = 128,
-    n_layer = 20,#14
-    n_head = 14,
-    n_embd = 420,
+    n_layer = 12,
+    n_head = 10,
+    n_embd = 360,
     dropout = 0.15,
     bias = True
 )
@@ -66,16 +66,16 @@ if is_debug:
     from_scratch = True
     stats_every_iteration = 10
     is_gan_training = False
-    batch_size = 1024
+    batch_size = 512
 
     # smaller debug model
     config = dict(
         block_size = 150,
         block_size_condition = 2,
         vocab_size = 128,
-        n_layer = 5,
-        n_head = 3,
-        n_embd = 300,
+        n_layer = 8,
+        n_head = 4,
+        n_embd = 400,
         dropout = 0.10,
         bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     )
@@ -149,7 +149,7 @@ if __name__ == '__main__':
             
             # calculate generative loss
             gx = model.generate(num_generate=149, condition=condition_bottleneck)
-            mae_trans = torch.mean(torch.abs(dx[:,:64,:] - gx[:,:64,:])).item()
+            mae_trans = torch.mean(torch.abs(dx[:,:,:] - gx[:,:,:])).item()
             gen_losses.append(mae_trans)
         model.train()
         return np.mean(losses), np.mean(gen_losses)
@@ -346,15 +346,26 @@ if __name__ == '__main__':
                     # save losses plot
                     plt.close(0)
                     plt.figure(0)
+                    plt.subplots(2, 1, figsize=(10, 20))
+                    plt.subplot(2,1,1)
                     plt.plot(iterations, train_losses, marker='o', linestyle='--', label='train')
                     plt.plot(iterations, val_losses, marker='o', linestyle='--', label='val')
+                    plt.ylim(0,0.5)
+                    plt.legend()
+                    plt.title('Train and Validation Losses after epoch %d' % i)
+
+                    # Create the second subplot for train_gen_losses and val_gen_losses
+                    plt.subplot(2, 1, 2)
                     plt.plot(iterations, train_gen_losses, marker='o', linestyle='--', label='train MAE')
                     plt.plot(iterations, val_gen_losses, marker='o', linestyle='--', label='val MAE')
+                    plt.ylim(0,0.5)
                     plt.legend()
-                    plt.title('Losses after epoch %d' % i)
-                    plt.savefig('results/losses.png')
-                    # plt.show()
-                    
+                    plt.title('Train and Validation MAE Losses after epoch %d' % i)
+
+                    plt.tight_layout()  # Adjust layout to prevent overlapping
+                    plt.savefig('results/losses.png')  # Save the figure
+                    plt.show()
+                                        
                 # early stopping
                 if is_parameter_search and i > best_val_loss_iter + 30:
                     print('early stopping at pass %d' % i)

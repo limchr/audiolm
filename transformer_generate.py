@@ -28,7 +28,7 @@ outdir = 'results/samples'
 
 device = 'cuda'
 seed = 1234
-ns = 20 # number of samples for x and y (total samples = ns*ns)
+ns = 80 # number of samples for x and y (total samples = ns*ns)
 num_generate = 150
 num_sample_points_export = 3000
 
@@ -47,7 +47,9 @@ np.random.seed(seed)
 
 if os.path.exists(outdir) and os.path.isdir(outdir):
     shutil.rmtree(outdir)
-os.makedirs(outdir)
+os.makedirs(os.path.join(outdir,'transformer'))
+os.makedirs(os.path.join(outdir,'nn'))
+os.makedirs(os.path.join(outdir,'vae'))
 
 
 
@@ -141,14 +143,22 @@ for xi,x in enumerate(sampling_x):
         p_transformer = classify(gx)
         p_vae = classify(vae_gx)
         p_nn = classify(nn_gx)
-
+        print(p_transformer)
 
         generated.append({'transformer': gx, 'vae': vae_gx, 'nn': nn_gx, 'classifications': {'transformer': p_transformer, 'vae': p_vae, 'nn': p_nn}})
 
         print('generated %d/%d' % (xi*ns+yi, ns*ns))
         if True:
+            wav = dsb.dataset.dataset.decode_sample(gx.to('cpu'))
+            dsb.dataset.dataset.save_audio(wav, f'results/samples/transformer/generated_%05d_%05d.wav' % (xi,yi))
+            
+            wav = dsb.dataset.dataset.decode_sample(vae_gx.to('cpu'))
+            dsb.dataset.dataset.save_audio(wav, f'results/samples/vae/generated_%05d_%05d.wav' % (xi,yi))
+
             wav = dsb.dataset.dataset.decode_sample(nn_gx.to('cpu'))
-            dsb.dataset.dataset.save_audio(wav, f'results/samples/generated_%05d_%05d.wav' % (xi,yi))
+            dsb.dataset.dataset.save_audio(wav, f'results/samples/nn/generated_%05d_%05d.wav' % (xi,yi))
+
+
     generated_map.append(generated)
 
 
@@ -171,10 +181,13 @@ for i in range(3): # models
             for yy in range(ns):
                 img[xx, yy] = generated_map[xx][yy]['classifications'][models[i]][j]
 
-        # Plot the image on the current subplot
-        im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays' if j == 1 else 'tab20')
 
+        if j==1:
+            # Plot the image on the current subplot
+            im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays')
         if j==0:
+            im = axs[j, i].imshow(img, interpolation='none', cmap="Pastel1")
+
             # Get the colors of the values, according to the colormap used by imshow
             colors = [im.cmap(im.norm(value)) for value in range(len(classes))]
 

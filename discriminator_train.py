@@ -35,7 +35,7 @@ batch_size = 1024
 
 loss_fn = F.binary_cross_entropy
 
-input_crop = 64
+input_crop = 150
 channels = [128,256,512,256]
 linears = [256, 128, 64, 5]
 dropout = 0.15
@@ -56,7 +56,7 @@ if __name__ == '__main__':
                                                                     dump_path= ds_buffer,
                                                                     build_dump_from_scratch=False,
                                                                     only_labeled_samples=True,
-                                                                    test_size=0.2,
+                                                                    test_size=0.1,
                                                                     equalize_class_distribution=True,
                                                                     equalize_train_data_loader_distribution=True,
                                                                     batch_size=batch_size,
@@ -72,7 +72,7 @@ if __name__ == '__main__':
         for dx, _, dy, _ in dl:
             dx = dx.to(device)
             dy = dy.to(device)
-            logits = model.forward(dx)
+            logits = model.forward(dx, True)
             loss = loss_fn(logits, dy)
             losses.append(loss.cpu().detach().item())    
             accuracy = (torch.max(dy,dim=1)[1] == torch.max(logits,dim=1)[1]).float().mean().item()
@@ -103,7 +103,7 @@ if __name__ == '__main__':
                 dx = dx.to(device)
                 dy = dy.to(device)
                 
-                logits = model.forward(dx)
+                logits = model.forward(dx, True)
                 
                 loss = loss_fn(logits, dy)
 
@@ -129,7 +129,7 @@ if __name__ == '__main__':
                     best_val_loss = val_loss
                     best_val_loss_iter = i
                     if not is_parameter_search:
-                        print('saving model to %s with val loss %.5f' % (ckpt_transformer, best_val_loss))
+                        print('saving model to %s with val loss %.5f' % (ckpt_discriminator, best_val_loss))
                         torch.save(model, ckpt_discriminator)
                 if i > 0 and train_loss < best_train_loss:
                     best_train_loss = train_loss

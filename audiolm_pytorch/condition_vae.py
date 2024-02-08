@@ -106,8 +106,7 @@ class ConditionVAE(nn.Module):
 
 
 
-
-
+import math
 
 
 class ConditionConvEncoder(nn.Module):
@@ -117,12 +116,14 @@ class ConditionConvEncoder(nn.Module):
         self.channels = channels
         self.linears = linears
 
+        conv_sizes = [input_crop,] + [math.ceil(input_crop / 2**(i+1)) for i in range(len(channels)-1)]
+
 
         for i in range(len(channels)-1):
             setattr(self, 'conv{}'.format(i), nn.Conv1d(
                 channels[i], channels[i+1], kernel_size=5, stride=2, padding=2
             ))
-            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([channels[i+1], input_crop // 2**(i+1)]))
+            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([channels[i+1], conv_sizes[i+1]]))
         
         for i in range(len(linears)-2):
             setattr(self, 'fc{}'.format(i), nn.Linear(
@@ -168,13 +169,18 @@ class ConditionConvDecoder(nn.Module):
         for i in range(len(linears)-1):
             setattr(self, 'fc{}'.format(i), nn.Linear(linears[i], linears[i+1]))
             setattr(self, 'bnl{}'.format(i), nn.LayerNorm(linears[i+1]))
+            
+        deconv_shape = [math.ceil(input_crop / 2**(len(channels)-1)),] + [math.floor(input_crop / 2**(len(channels)-2-i)) for i in range(len(channels)-1)]
+        print(deconv_shape)
+        output_paddings = [1 if i%2 == 0 else 0 for i in range(len(channels)-1)]
 
         # make deconvolutional layers
         for i in range(len(self.channels)-1):
             setattr(self, 'deconv{}'.format(i), nn.ConvTranspose1d(
-                self.channels[i], self.channels[i+1], kernel_size=5, stride=2, padding=2, output_padding=1
+                self.channels[i], self.channels[i+1], kernel_size=5, stride=2, padding=2, output_padding=output_paddings[i]
             ))
-            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([self.channels[i+1], self.input_crop // 2**(len(self.channels)-2-i)]))
+
+            setattr(self, 'bnc{}'.format(i), nn.LayerNorm([self.channels[i+1], deconv_shape[i+1]]))
 
 
 
@@ -189,11 +195,11 @@ class ConditionConvDecoder(nn.Module):
             x = self.relu(x)
             # x = self.dropout(x)
 
-        x = x.view([x.shape[0], self.channels[0], self.input_crop // 2**(len(self.channels)-1)] )
+        x = x.view([x.shape[0], self.channels[0], math.ceil(self.input_crop / 2**(len(self.channels)-1))] )
 
         for i in range(0,len(self.channels)-1):
             x = getattr(self, 'deconv{}'.format(i))(x)
-            x = getattr(self, 'bnc{}'.format(i))(x)
+            # x = getattr(self, 'bnc{}'.format(i))(x)
             x = self.relu(x)
             # x = self.dropout(x)
 
@@ -204,7 +210,10 @@ class ConditionConvVAE(nn.Module):
     def __init__(self, channels, linears, input_crop):
         super(ConditionConvVAE, self).__init__()
 
-        intermediate_output_size = int(input_crop / 2**(len(channels)-1)) * channels[-1]
+
+
+
+        intermediate_output_size = math.ceil(input_crop / 2**(len(channels)-1)) * channels[-1]
         linears = [intermediate_output_size,] + linears
         self.encoder = ConditionConvEncoder(channels, linears, input_crop)
         self.decoder = ConditionConvDecoder(channels[::-1], linears[::-1], input_crop)
@@ -241,3 +250,4 @@ class ConditionConvVAE(nn.Module):
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_normal_(layer.weight, gain=0.2)
                 nn.init.constant_(layer.bias, 0)  # Initialize biases to zero or another suitable value
+

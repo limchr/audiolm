@@ -38,22 +38,22 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 1000
+num_passes = 150
 batch_size = 512
-lr = 6e-4 # learning rate
+lr = 3e-4 # learning rate
 wd = 0.1 # weight decay
 betas = (0.9, 0.95) # adam betas
-dr = 0.0 # dropout rate
+dr = 0.3 # dropout rate
 
 # crop the time dimension to this length (150 -> input_crop)
-input_crop = 64
+input_crop = 150
 
 # simple vae without convolutional layers
 # layers = [128, 64, 32, 16]
 
 # vae with convolutional layers
-channels = [128,128,256,128]
-linears = [128, 128, 64, 2]
+channels = [128,128,64,32]
+linears = [128, 64, 32, 2]
 
 
 # get the audio dataset

@@ -28,7 +28,7 @@ device = 'cuda'
 seed = 1234
 num_generate = 150
 nneighbors = 5
-batch_size = 128
+batch_size = 512
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
 
 torch.manual_seed(seed)
@@ -79,6 +79,12 @@ numeric_classes = np.array(numeric_classes, dtype=np.int32)
 
 def get_maes(ds):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False)
+    mae_trans_l = []
+    mae_vae_l = []
+    mae_nn_l = []
+    mae_trans_cp_l = []
+    mae_vae_cp_l = []
+    mae_nn_cp_l = []
     for d in dl:
         dx = d[0].to(device=device)
 
@@ -104,7 +110,7 @@ def get_maes(ds):
             nn_gx[bi,:,:] = averagenn
 
         # cropping because VAE has crop, to make a fair comparison
-        cropt = 64
+        cropt = 150
 
         mae_trans = torch.mean(torch.abs(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
         mae_vae = torch.mean(torch.abs(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
@@ -120,8 +126,15 @@ def get_maes(ds):
         mae_trans_cp = torch.mean(torch.abs(dx_p - gx_p)).item()
         mae_vae_cp = torch.mean(torch.abs(dx_p - vae_gx_p)).item()
         mae_nn_cp = torch.mean(torch.abs(dx_p - nn_gx_p)).item()
+        
+        mae_trans_l.append(mae_trans)
+        mae_vae_l.append(mae_vae)
+        mae_nn_l.append(mae_nn)
+        mae_trans_cp_l.append(mae_trans_cp)
+        mae_vae_cp_l.append(mae_vae_cp)
+        mae_nn_cp_l.append(mae_nn_cp)
 
-        return mae_trans, mae_vae, mae_nn, mae_trans_cp, mae_vae_cp, mae_nn_cp
+    return np.mean(mae_trans_l), np.mean(mae_vae_l), np.mean(mae_nn_l), np.mean(mae_trans_cp_l), np.mean(mae_vae_cp_l), np.mean(mae_nn_cp_l)
 
 
 print('Calculating MAEs for train set (transformer, vae, nn)')

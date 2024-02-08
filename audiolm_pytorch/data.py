@@ -350,11 +350,11 @@ class EncodecSoundDataset(Dataset):
     def encode_sample(self,wav_data):
         codes, indices, _ = self.encodec.forward(wav_data, 24000, True)
 
-        codes = codes / 5.0
+        # codes = codes / 5.0
 
         # subtract mean per feature dimension
 
-        codes = codes - self.fm
+        # codes = codes - self.fm
 
 
 
@@ -369,9 +369,9 @@ class EncodecSoundDataset(Dataset):
         return x, y
 
     def decode_sample(self, codes):
-        codes = codes + self.fm
+        # codes = codes + self.fm
         
-        codes = codes * 5.0
+        # codes = codes * 5.0
 
         codes = codes[:,1:,:] # remove first zero vector
         wav = self.encodec.decode(codes)
