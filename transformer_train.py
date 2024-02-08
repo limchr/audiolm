@@ -24,10 +24,11 @@ from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer
 
 
 device = 'cuda'
-from_scratch = False # train model from scratch, otherwise load from checkpoint
+from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
+only_labeled_samples=True
 
-num_passes = 300 # num passes through the dataset
+num_passes = 600 # num passes through the dataset
 
 learning_rate = 3e-5 # max learning rate
 weight_decay = 0.05
@@ -37,7 +38,7 @@ batch_size = 100
 
 seed = 1234
 
-stats_every_iteration = 10
+stats_every_iteration = 20
 train_set_testing_size = 2000
 is_gan_training = False
 
@@ -60,20 +61,21 @@ config = dict(
 
 
 
-is_debug = True
+is_debug = False
 if is_debug:
     from_scratch = True
-    stats_every_iteration = 1
+    stats_every_iteration = 10
     is_gan_training = False
+    batch_size = 1024
 
     # smaller debug model
     config = dict(
         block_size = 150,
         block_size_condition = 2,
         vocab_size = 128,
-        n_layer = 6,
-        n_head = 1,
-        n_embd = 220,
+        n_layer = 5,
+        n_head = 3,
+        n_embd = 300,
         dropout = 0.10,
         bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     )
@@ -122,7 +124,7 @@ if __name__ == '__main__':
     dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_folders,
                                                                     dump_path= ds_buffer,
                                                                     build_dump_from_scratch=ds_from_scratch,
-                                                                    only_labeled_samples=True,
+                                                                    only_labeled_samples=only_labeled_samples,
                                                                     test_size=0.1,
                                                                     equalize_class_distribution=True,
                                                                     equalize_train_data_loader_distribution=True,
@@ -167,6 +169,7 @@ if __name__ == '__main__':
         best_val_gen_loss = 1e9
         best_val_gen_loss_iter = 0
 
+        iterations = [] # for plotting
         train_losses = []
         val_losses = []
         train_gen_losses = []
@@ -303,6 +306,7 @@ if __name__ == '__main__':
                 train_loss, train_gen_loss = det_loss_testing(torch.utils.data.Subset(ds_train,list(range(0,train_set_testing_size))), model, condition_model)
                 val_loss, val_gen_loss = det_loss_testing(ds_val, model, condition_model)
                 
+                iterations.append(i) # for plotting
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
                 train_gen_losses.append(train_gen_loss)
@@ -342,9 +346,12 @@ if __name__ == '__main__':
                     # save losses plot
                     plt.close(0)
                     plt.figure(0)
-                    plt.plot(train_losses, label='train')
-                    plt.plot(val_losses, label='val')
+                    plt.plot(iterations, train_losses, marker='o', linestyle='--', label='train')
+                    plt.plot(iterations, val_losses, marker='o', linestyle='--', label='val')
+                    plt.plot(iterations, train_gen_losses, marker='o', linestyle='--', label='train MAE')
+                    plt.plot(iterations, val_gen_losses, marker='o', linestyle='--', label='val MAE')
                     plt.legend()
+                    plt.title('Losses after epoch %d' % i)
                     plt.savefig('results/losses.png')
                     # plt.show()
                     
