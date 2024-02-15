@@ -281,7 +281,7 @@ class ConditionedGPT(nn.Module):
         
         
         xd = self.transformer.drop(tok_emb + pos_emb)
-        xe = self.transformer.dropc(condition_emb + pos_emb_encoder)
+        xe = condition_emb + pos_emb_encoder # removed dropout here
 
 
         for e in self.transformer.he:

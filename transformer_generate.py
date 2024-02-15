@@ -18,8 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.patches as mpatches
 
-from transformer_train import load_model
-from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer, ckpt_discriminator
+from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer, ckpt_transformer_latest, ckpt_discriminator
 
 import os
 import shutil
@@ -28,9 +27,10 @@ outdir = 'results/samples'
 
 device = 'cuda'
 seed = 1234
-ns = 80 # number of samples for x and y (total samples = ns*ns)
+ns = 20 # number of samples for x and y (total samples = ns*ns)
 num_generate = 150
 num_sample_points_export = 3000
+ckpt = ckpt_transformer_latest
 
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
 visualization_area = [-1, 1, -1, 1]
@@ -47,14 +47,14 @@ np.random.seed(seed)
 
 if os.path.exists(outdir) and os.path.isdir(outdir):
     shutil.rmtree(outdir)
-os.makedirs(os.path.join(outdir,'transformer'))
+os.makedirs(os.path.join(outdir,'samples'))
 os.makedirs(os.path.join(outdir,'nn'))
 os.makedirs(os.path.join(outdir,'vae'))
 
 
-
-model, checkpoint = load_model(ckpt_transformer)
-config = model.config
+from transformer_train_torch import GesamTransformer
+model = torch.load(ckpt)[0]
+model.eval()
 
 condition_model = torch.load(ckpt_vae)
 condition_model.eval()
@@ -113,6 +113,7 @@ def classify(x):
     softmax = discriminator(x,True)[0]
     argsort = torch.argsort(softmax)
     margin = (softmax[argsort[-1]]-softmax[argsort[-2]]).item()
+    best_confidence = softmax[argsort[-1]].item()
     class_id = argsort[-1].item()
     return class_id, margin
 
@@ -128,10 +129,9 @@ for xi,x in enumerate(sampling_x):
     generated = []
     for yi,y in enumerate(sampling_y):
         gx = None
-        gx = model.generate(num_generate=num_generate-1, condition=[[x,y]])
+        gx = model.generate(num_generate=num_generate, condition=[[x,y]])
 
-        vae_gx = condition_model.decoder(torch.tensor([[x,y]],dtype=torch.float).to(device))
-        vae_gx = vae_gx.swapaxes(1,2)
+        vae_gx = condition_model.decode(torch.tensor([[x,y]],dtype=torch.float).to(device))
 
         sort_i = np.argsort(np.linalg.norm(bottlenecks - np.array([x,y],dtype=np.float32), axis=1))[:nneighbors]
         nn_gx = torch.zeros((1,150,128)).to(device)
@@ -150,7 +150,7 @@ for xi,x in enumerate(sampling_x):
         print('generated %d/%d' % (xi*ns+yi, ns*ns))
         if True:
             wav = dsb.dataset.dataset.decode_sample(gx.to('cpu'))
-            dsb.dataset.dataset.save_audio(wav, f'results/samples/transformer/generated_%05d_%05d.wav' % (xi,yi))
+            dsb.dataset.dataset.save_audio(wav, f'results/samples/samples/generated_%05d_%05d.wav' % (xi,yi))
             
             wav = dsb.dataset.dataset.decode_sample(vae_gx.to('cpu'))
             dsb.dataset.dataset.save_audio(wav, f'results/samples/vae/generated_%05d_%05d.wav' % (xi,yi))
@@ -164,11 +164,16 @@ for xi,x in enumerate(sampling_x):
 
 classes = ds_train.ds.classes
 
+import pickle as pkl
+with open('results/map_data.pkl', 'wb') as f:
+    pkl.dump(generated_map, f)
+
 
 plt.close()
 # Define the figure and subplot grid
-fig, axs = plt.subplots(2, 3, figsize=(1, 1))
+fig, axs = plt.subplots(2, 3, figsize=(10, 10))
 
+model_labels = ['Transformer', 'VAE-Dec', 'kNN-Map']
 models = ['transformer', 'vae', 'nn']
 
 
@@ -186,7 +191,7 @@ for i in range(3): # models
             # Plot the image on the current subplot
             im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays')
         if j==0:
-            im = axs[j, i].imshow(img, interpolation='none', cmap="Pastel1")
+            im = axs[j, i].imshow(img, interpolation='none', cmap="tab10")
 
             # Get the colors of the values, according to the colormap used by imshow
             colors = [im.cmap(im.norm(value)) for value in range(len(classes))]
@@ -197,12 +202,12 @@ for i in range(3): # models
             # Put those patched as legend-handles into the legend
             # axs[j, i].legend(handles=patches, borderaxespad=0., loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=len(classes)//2)
 
-            axs.flat[i].set_title(models[i])
+            axs.flat[i].set_title(model_labels[i])
 
 
 
 
-        axs[j, i].grid(True, which='both', axis='both', linestyle='--', color='k', linewidth=1)
+        axs[j, i].grid(True, which='both', axis='both', linestyle='--', color='k', linewidth=0.1)
         axs[j, i].set_xticks(np.arange(0, ns, 1) + 0.5)
         axs[j, i].set_yticks(np.arange(0, ns, 1) + 0.5)
         axs[j, i].tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
@@ -240,7 +245,7 @@ plt.show()
 print('For integrating the new data into the web app, do the following:')
 print('copy zy.csv to the web app folder: cp /home/chris/src/audiolm/results/zy.csv /home/chris/src/audiogen_demo/data/models/drums/zy.csv')
 print('remove the old sample files: rm /home/chris/src/audiogen_demo/data/models/drums/samples/ -r')
-print('move new generated samples to the folder: mv /home/chris/src/audiolm/results/samples /home/chris/src/audiogen_demo/data/models/drums/')
+print('move new generated samples to the folder: mv /home/chris/src/audiolm/results/samples/samples /home/chris/src/audiogen_demo/data/models/drums/')
 print('add classes to the web app:')
 class_str = ''
 for i in range(len(dsb.dataset.dataset.classes)):

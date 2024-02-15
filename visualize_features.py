@@ -34,7 +34,7 @@ print("Features loaded successfully.")
 # plt.title('Spectral Centroid Distribution')
 # plt.show()
 
-def plot_feature_heatmap(features_list, feature_name, xlabel='Index X', ylabel='Index Y', title=None):
+def plot_feature_heatmap(features_list, feature_name, xlabel='', ylabel='', title=None):
     """
     Plots a heatmap for a specific feature across the samples grid.
 
@@ -67,8 +67,12 @@ def plot_feature_heatmap(features_list, feature_name, xlabel='Index X', ylabel='
     plt.colorbar(label=feature_name)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
-    plt.title(title if title else f'Heatmap of {feature_name}')
+    plt.title(title if title else f'{feature_name} heatmap')
     plt.tight_layout()
+    # remove ticks
+    plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
+                    labelbottom=False, labelleft=False)
+    plt.savefig('results/features_heatmap_%s.png' % feature_name)
     plt.show()
 
 feature_names = ['energy', 'spectral_centroid', 'spectral_bandwidth', 'spectral_flatness', 'spectral_rolloff', 'zero_crossing_rate']

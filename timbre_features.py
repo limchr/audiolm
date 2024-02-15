@@ -46,7 +46,7 @@ def extract_indices(filename):
     return x, y
 
 
-folder_path = 'data/models/drums/samples'
+folder_path = '/home/chris/src/audiogen_demo/data/models/drums/samples'
 features_list = []
 
 # Loop through all files in the folder
@@ -88,4 +88,5 @@ plt.colorbar(label='Spectral Centroid')
 plt.xlabel('Index X')
 plt.ylabel('Index Y')
 plt.title('Spectral Centroid Distribution')
+plt.savefig('results/spectral_centroid_distribution.png')
 plt.show()

@@ -79,12 +79,9 @@ numeric_classes = np.array(numeric_classes, dtype=np.int32)
 
 def get_maes(ds):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False)
-    mae_trans_l = []
-    mae_vae_l = []
-    mae_nn_l = []
-    mae_trans_cp_l = []
-    mae_vae_cp_l = []
-    mae_nn_cp_l = []
+    maes = np.zeros((0,6), dtype=np.float32)
+    mses = np.zeros((0,6), dtype=np.float32)
+
     for d in dl:
         dx = d[0].to(device=device)
 
@@ -109,44 +106,103 @@ def get_maes(ds):
             averagenn /= nneighbors
             nn_gx[bi,:,:] = averagenn
 
+        # plot with matplotlib all four images dx, gx vae_gx and nn_gx squared below each other
+        plt.figure(figsize=(10,15))
+        # remove all axes
+        plt.axis('off')
+        # remove all ticks
+        
+        plt.subplot(4,1,1)
+        plt.imshow(dx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+        plt.title('original')
+        
+        plt.subplot(4,1,2)
+        plt.imshow(gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+        plt.title('transformer generated')
+
+        plt.subplot(4,1,3)
+        plt.imshow(vae_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+        plt.title('VAE generated')        
+
+        plt.subplot(4,1,4)
+        plt.imshow(nn_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+        plt.title('NN generated')
+        
+        plt.tight_layout()
+        plt.savefig('results/embedding_comparison.png')
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         # cropping because VAE has crop, to make a fair comparison
         cropt = 150
-
-        mae_trans = torch.mean(torch.abs(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
-        mae_vae = torch.mean(torch.abs(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
-        mae_nn = torch.mean(torch.abs(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
-
-        # use classifier for MAE of posterior probabilities
         
         dx_p = discriminator.forward(dx,True)
         gx_p = discriminator.forward(gx,True)
         vae_gx_p = discriminator.forward(vae_gx,True)
         nn_gx_p = discriminator.forward(nn_gx,True)   
 
+
+        mae_trans = torch.mean(torch.abs(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
+        mae_vae = torch.mean(torch.abs(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
+        mae_nn = torch.mean(torch.abs(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
         mae_trans_cp = torch.mean(torch.abs(dx_p - gx_p)).item()
         mae_vae_cp = torch.mean(torch.abs(dx_p - vae_gx_p)).item()
         mae_nn_cp = torch.mean(torch.abs(dx_p - nn_gx_p)).item()
+        # concatenate to maes
+        maes = np.concatenate((maes, np.array([[mae_trans, mae_vae, mae_nn, mae_trans_cp, mae_vae_cp, mae_nn_cp]], dtype=np.float32)), axis=0)
         
-        mae_trans_l.append(mae_trans)
-        mae_vae_l.append(mae_vae)
-        mae_nn_l.append(mae_nn)
-        mae_trans_cp_l.append(mae_trans_cp)
-        mae_vae_cp_l.append(mae_vae_cp)
-        mae_nn_cp_l.append(mae_nn_cp)
+        mse_trans = torch.mean(torch.square(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
+        mse_vae = torch.mean(torch.square(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
+        mse_nn = torch.mean(torch.square(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
+        mse_trans_cp = torch.mean(torch.square(dx_p - gx_p)).item()
+        mse_vae_cp = torch.mean(torch.square(dx_p - vae_gx_p)).item()
+        mse_nn_cp = torch.mean(torch.square(dx_p - nn_gx_p)).item()
+        # concatenate to mses
+        mses = np.concatenate((mses, np.array([[mse_trans, mse_vae, mse_nn, mse_trans_cp, mse_vae_cp, mse_nn_cp]], dtype=np.float32)), axis=0)
 
-    return np.mean(mae_trans_l), np.mean(mae_vae_l), np.mean(mae_nn_l), np.mean(mae_trans_cp_l), np.mean(mae_vae_cp_l), np.mean(mae_nn_cp_l)
+    return np.mean(maes, axis=0), np.mean(mses, axis=0)
 
 
 print('Calculating MAEs for train set (transformer, vae, nn)')
-maes_train = get_maes(ds_train)
+maes_train, mses_train = get_maes(ds_train)
 print('Calculating MAEs for val set (transformer, vae, nn)')
-maes_val = get_maes(ds_val)
+maes_val, mses_val = get_maes(ds_val)
+
+print(' & Transformer & VAE & NN \\\\')
+print('\\hline')
+print('\\hline')
+print('\\textbf{training set} & & & \\\\')
+print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[0], maes_train[1], maes_train[2]))
+print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[3], maes_train[4], maes_train[5]))
+print('\\hline')
+print('\\textbf{test set} & & & \\\\')
+print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[0], maes_val[1], maes_val[2]))
+print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[3], maes_val[4], maes_val[5]))
+print('\hline')
+print('\hline')
 
 print(' & Transformer & VAE & NN \\\\')
 print('training set & & & \\')
-print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[0], maes_train[1], maes_train[2]))
-print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[3], maes_train[4], maes_train[5]))
+print('embedding MSE & %.4f & %.4f & %.4f \\\\' % (mses_train[0], mses_train[1], mses_train[2]))
+print('classifier MSE & %.4f & %.4f & %.4f \\\\' % (mses_train[3], mses_train[4], mses_train[5]))
 print('test set & & & \\')
-print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[0], maes_val[1], maes_val[2]))
-print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[3], maes_val[4], maes_val[5]))
+print('embedding MSE & %.4f & %.4f & %.4f \\\\' % (mses_val[0], mses_val[1], mses_val[2]))
+print('classifier MSE & %.4f & %.4f & %.4f \\\\' % (mses_val[3], mses_val[4], mses_val[5]))
 

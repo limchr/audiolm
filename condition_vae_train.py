@@ -28,7 +28,7 @@ from experiment_config import ds_folders, ds_buffer, ckpt_vae
 
 
 # we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
-seed = 1237
+seed = 1238
 data_seed = 1234
 
 torch.manual_seed(seed)
@@ -38,12 +38,11 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 150
+num_passes = 200
 batch_size = 512
-lr = 3e-4 # learning rate
-wd = 0.1 # weight decay
+lr = 6e-4 # learning rate
+wd = 0.05 # weight decay
 betas = (0.9, 0.95) # adam betas
-dr = 0.3 # dropout rate
 
 # crop the time dimension to this length (150 -> input_crop)
 input_crop = 150
@@ -52,12 +51,12 @@ input_crop = 150
 # layers = [128, 64, 32, 16]
 
 # vae with convolutional layers
-channels = [128,128,64,32]
+channels = [128,64,32,16]
 linears = [128, 64, 32, 2]
 
 
 # get the audio dataset
-# ds_folders = ['/home/chris/data/audio_samples/ds_min/'] # for debugging
+# ds_folders = ['/home/chris/data/audio_samples/single_packs/kb6'] # for debugging
 # ds_buffer = '/home/chris/data/audio_samples/ds_min.pkl' # for debugging
 dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_folders,
                                                                 dump_path= ds_buffer,
@@ -69,7 +68,7 @@ dsb, ds_train, ds_val, dl_train, dl_val = get_audio_dataset(audiofile_paths= ds_
                                                                 batch_size=batch_size,
                                                                 seed=data_seed)
 # check for train test split random correctness
-print(ds_train[123][3], ds_train[245][3], ds_val[456][3], ds_val[125][3])
+print(ds_train[54][3], ds_train[23][3], ds_val[87][3], ds_val[43][3])
 
 
 
@@ -106,9 +105,9 @@ def loss_fn2(x, x_hat, mean, var, beta = 1.):
         reproduction_loss = loss_fn(x_hat, x) / normalization
 
     kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
+    
+    
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
-
-
     scalar = torch.FloatTensor([0.0]).to(device)
     kl_loss += torch.max((l-1.0),scalar.expand_as(l)).mean() * 0.1
     # kl_loss += torch.mean(torch.abs(l-0.8)) * 0.001
@@ -126,8 +125,8 @@ def det_loss(va,ds):
     va.eval()
     for dx, _, _, _ in dl:
         dx = dx.to(device)
-        x, x_hat, mean, var = va.forward(dx)
-        rec_loss, kld_loss = loss_fn2(x, x_hat, mean, var)
+        x_hat, mean, var = va.forward(dx)
+        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
         losses.append([rec_loss.item(), kld_loss.item()])
     va.train()
     losses = np.array(losses).mean(axis=0)
@@ -150,16 +149,16 @@ for i in range(num_passes):
 
     for dx, _, _, _ in dl_train:
         dx = dx.to(device)
-        x, x_hat, mean, var = vae.forward(dx)
-        rec_loss, kld_loss = loss_fn2(x, x_hat, mean, var)
+        x_hat, mean, var = vae.forward(dx)
+        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
         loss = rec_loss + kld_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
-    if i == int(num_passes * 0.6) or i == int(num_passes * 0.8):
+    if i == int(num_passes * 0.8) or i == int(num_passes * 0.9):
         # change learning rate
-        lr = lr * 0.2
+        lr = lr * 0.1
         optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
         print('############################# new lr: %.8f' % lr)
         
@@ -229,8 +228,9 @@ for i in range(num_passes):
                 f, axarr = plt.subplots(1,2) 
 
                 cl_name = classes[i]
-                x, x_hat, x_mean, x_log_var = vae.forward(samples_of_class.to(device))
-                xorig = x[0].cpu().detach().numpy()
+                soc = samples_of_class.to(device)
+                x_hat, x_mean, x_log_var = vae.forward(soc)
+                xorig = soc[0].cpu().detach().numpy()
                 xrec = x_hat[0].cpu().detach().numpy()
                 axarr[0].imshow(xorig)
                 axarr[1].imshow(xrec)

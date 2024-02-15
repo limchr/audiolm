@@ -77,14 +77,18 @@ def get_audio_dataset(audiofile_paths,
                       equalize_class_distribution,
                       equalize_train_data_loader_distribution,
                       batch_size,
-                      seed):
+                      seed,
+                      num_samples=None
+                      ):
     pds = EncodecSoundDataset(folders=audiofile_paths, length=2, device='cpu', seed=seed)
     dsb = BufferedDataset(pds, dump_path, build_dump_from_scratch)
     
     if only_labeled_samples:
         labeled_idx = [i for i in range(len(dsb)) if dsb[i][3] >= 0]
         dsb = torch.utils.data.Subset(dsb, labeled_idx)
-    
+    if not num_samples is None:
+        dsb = torch.utils.data.Subset(dsb,list(range(0,num_samples)))
+        
     
     stratify = [yy[3].item() for yy in dsb] if equalize_class_distribution else None
     train_indices, val_indices = train_test_split(np.arange(len(dsb)), 

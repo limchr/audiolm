@@ -61,12 +61,12 @@ config = dict(
 
 
 
-is_debug = False
+is_debug = True
 if is_debug:
     from_scratch = True
     stats_every_iteration = 10
     is_gan_training = False
-    batch_size = 512
+    batch_size = 256
 
     # smaller debug model
     config = dict(
@@ -75,9 +75,9 @@ if is_debug:
         vocab_size = 128,
         n_layer = 8,
         n_head = 4,
-        n_embd = 400,
+        n_embd = 420,
         dropout = 0.10,
-        bias = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+        bias = False # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     )
 
 
@@ -284,15 +284,15 @@ if __name__ == '__main__':
                     
             # change learning rate at several points during training
             if i > int(num_passes*0.9):
-                change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6 * 0.6
+                change_learning_rate = learning_rate * 0.5 * 0.5 * 0.5 * 0.5 * 0.5
             elif i > int(num_passes*0.8):
-                change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6 * 0.6
+                change_learning_rate = learning_rate * 0.5 * 0.5 * 0.5 * 0.5
             elif i > int(num_passes*0.7):
-                change_learning_rate = learning_rate * 0.6 * 0.6 * 0.6
+                change_learning_rate = learning_rate * 0.5 * 0.5 * 0.5
             elif i > int(num_passes*0.6):
-                change_learning_rate = learning_rate * 0.6 * 0.6
+                change_learning_rate = learning_rate * 0.5 * 0.5
             elif i > int(num_passes*0.5):
-                change_learning_rate = learning_rate * 0.6
+                change_learning_rate = learning_rate * 0.5
             if change_learning_rate != actual_learning_rate:   
                 optimizer = model.configure_optimizers(weight_decay=weight_decay,learning_rate=change_learning_rate,betas=(beta1, beta2),device_type=device)
                 actual_learning_rate = change_learning_rate
