@@ -24,16 +24,16 @@ import os
 import shutil
 
 outdir = 'results/samples'
+ckpt = 'results/transformer_cptv1.pt'
 
 device = 'cuda'
 seed = 1234
-ns = 20 # number of samples for x and y (total samples = ns*ns)
+ns = 80 # number of samples for x and y (total samples = ns*ns)
 num_generate = 150
-num_sample_points_export = 3000
-ckpt = ckpt_transformer_latest
+num_sample_points_export = 5000
 
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
-visualization_area = [-1, 1, -1, 1]
+visualization_area = [-0.8, 1, -0.8, 0.8]
 visualization_to_model_space = lambda va,x,y: [ (va[1]-va[0]) * (x+1)/2 + va[0], (va[3]-va[2]) * (y+1)/2 + va[2] ]
 model_to_visualization_space = lambda va,x,y: [ (x-va[0])/(va[1]-va[0]) * 2 - 1, (y-va[2])/(va[3]-va[2]) * 2 - 1 ]
 sampling_x = np.linspace(visualization_area[0],visualization_area[1],ns)
@@ -221,7 +221,7 @@ plt.gcf().set_size_inches(20, 10)
 # Show the plot
 plt.tight_layout()
 plt.savefig('results/classification_map.png')
-plt.show()
+# plt.show()
 
 
 

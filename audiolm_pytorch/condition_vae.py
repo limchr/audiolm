@@ -207,9 +207,8 @@ class ConditionConvVAE(nn.Module):
         return x, mean, var
 
 
-    def encode(self, input):
-        input = input[:,:self.input_crop,:]
-        x = input
+    def encode(self, x):
+        x = x[:,:self.input_crop,:]
         x = x.swapaxes(1,2) # for making it batch, channels, time
         
         # encoder

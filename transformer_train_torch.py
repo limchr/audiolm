@@ -20,10 +20,10 @@ from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 only_labeled_samples=True
 
-num_passes = 900 # num passes through the dataset
+num_passes = 300 # num passes through the dataset
 
 learning_rate = 9e-5 # max learning rate
-weight_decay = 0.1
+weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
 batch_size = 256
@@ -43,7 +43,7 @@ config = dict(
     n_layer_encoder = 4,
     n_layer_decoder = 11,
     n_head = 8,
-    dropout = 0.3
+    dropout = 0.25
 )
 
 class GesamTransformer(nn.Module):
@@ -152,10 +152,9 @@ if __name__ == '__main__':
     @torch.no_grad()
     def det_loss_testing(ds, model, condition_model):
         dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # get new dataloader because we want random sampling here!
-        model.eval()
         losses = []
         gen_losses = []
-        gen_loss_crop = 30
+        gen_loss_crop = 150
         for dx, dy, _, _ in dl:
             dx = dx.to(device)
             dy = dy.to(device)
@@ -165,7 +164,6 @@ if __name__ == '__main__':
             gx = model.generate(gen_loss_crop, condition_bottleneck)
             gen_loss = torch.mean(torch.abs(dx[:,:gen_loss_crop,:]-gx[:,:gen_loss_crop,:])).item()
             gen_losses.append(gen_loss)
-        model.train()
         return np.mean(losses), np.mean(gen_losses)
 
     def save_model( ckpt_path,
@@ -273,6 +271,7 @@ if __name__ == '__main__':
         iteration = 0
         for i in range(start_iter,num_passes):
             iteration = i
+            model.train()
             print('start iteration %d' % i)
             for dx, dy, _, _ in dl_train: # training is unsupervised so we don't need the labels (only shifted x)
                 # autoregressive loss transformer training
@@ -305,6 +304,9 @@ if __name__ == '__main__':
 
             # plot training stats
             if i > 0 and (i+1) % stats_every_iteration == 0:
+
+                model.eval()
+
                 print('calculating losses at iteration %d' % i)
                 train_loss, train_gen_loss = det_loss_testing(
                     torch.utils.data.Subset(ds_train,list(range(0,min(len(ds_train), train_set_testing_size)))), model, condition_model)
@@ -381,6 +383,8 @@ if __name__ == '__main__':
                 if is_parameter_search and i > best_val_loss_iter + 30:
                     print('early stopping at pass %d' % i)
                     break
+
+
                 
         del model
         del condition_model

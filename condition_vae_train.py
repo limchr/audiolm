@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 from experiment_config import ds_folders, ds_buffer, ckpt_vae
+import gc
 
 
 # we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
@@ -38,8 +39,8 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 200
-batch_size = 512
+num_passes = 600
+batch_size = 1024
 lr = 6e-4 # learning rate
 wd = 0.05 # weight decay
 betas = (0.9, 0.95) # adam betas
@@ -51,8 +52,8 @@ input_crop = 150
 # layers = [128, 64, 32, 16]
 
 # vae with convolutional layers
-channels = [128,64,32,16]
-linears = [128, 64, 32, 2]
+channels = [128,256,128,64]
+linears = [256, 128, 64, 32, 2]
 
 
 # get the audio dataset
@@ -104,8 +105,8 @@ def loss_fn2(x, x_hat, mean, var, beta = 1.):
     else:
         reproduction_loss = loss_fn(x_hat, x) / normalization
 
-    kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
-    
+    # kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
+    kl_loss = 0
     
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
     scalar = torch.FloatTensor([0.0]).to(device)
@@ -122,13 +123,11 @@ def loss_fn2(x, x_hat, mean, var, beta = 1.):
 def det_loss(va,ds):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False) # same class distribution as dataset
     losses = []
-    va.eval()
     for dx, _, _, _ in dl:
         dx = dx.to(device)
         x_hat, mean, var = va.forward(dx)
         rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
         losses.append([rec_loss.item(), kld_loss.item()])
-    va.train()
     losses = np.array(losses).mean(axis=0)
     return losses
 
@@ -140,19 +139,19 @@ def print_param_stats(model):
             print('param: %s \t mean: %.6f \t std: %.6f' % (pn, p.mean().item(), p.std().item()))
 
 
-vae.train()
+
 
 train_losses = []
 val_losses = []
 
 for i in range(num_passes):
-
+    vae.train()
     for dx, _, _, _ in dl_train:
+        optimizer.zero_grad(set_to_none=True)
         dx = dx.to(device)
         x_hat, mean, var = vae.forward(dx)
         rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
         loss = rec_loss + kld_loss
-        optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
@@ -167,6 +166,9 @@ for i in range(num_passes):
 
 
     if i % 10 == 0:
+
+        vae.eval()
+        
         train_loss_rec, train_loss_kld = det_loss(vae,ds_train)
         val_loss_rec, val_loss_kld = det_loss(vae,ds_val)
         train_losses.append([train_loss_rec, train_loss_kld])
@@ -177,11 +179,6 @@ for i in range(num_passes):
         
         # print('saving model of epoch %d' % i)
         torch.save(vae, ckpt_vae)
-
-
-
-        vae.eval()
-
 
         # save losses plot
         tp = np.array(train_losses)
@@ -200,13 +197,12 @@ for i in range(num_passes):
 
 
 
-
         plt.close(0)
         plt.figure(0)
 
         classes = ds_train.ds.classes
         for i in range(len(classes)):
-            samples_of_class = dsx[dsy==i]
+            samples_of_class = dsx[dsy==i][:batch_size]
             if len(samples_of_class) > 0:
                 outp_mean, outp_var  = vae.forward(samples_of_class.to(device),encoder_only=True)    
                 px = outp_mean.cpu().detach().numpy()
@@ -218,33 +214,32 @@ for i in range(num_passes):
         plt.legend()
         plt.savefig('results/vae_latent_distribution.png')
 
+        if True:
+            for i in range(len(classes)):
+                samples_of_class = dsx[dsy==i][:batch_size]
+                if len(samples_of_class) > 0:
+                    plt.close(0)
+                    plt.figure(0)
+                    f, axarr = plt.subplots(1,2) 
 
-
-        for i in range(len(classes)):
-            samples_of_class = dsx[dsy==i]
-            if len(samples_of_class) > 0:
-                plt.close(0)
-                plt.figure(0)
-                f, axarr = plt.subplots(1,2) 
-
-                cl_name = classes[i]
-                soc = samples_of_class.to(device)
-                x_hat, x_mean, x_log_var = vae.forward(soc)
-                xorig = soc[0].cpu().detach().numpy()
-                xrec = x_hat[0].cpu().detach().numpy()
-                axarr[0].imshow(xorig)
-                axarr[1].imshow(xrec)
-                
-                axarr[0].set_title('original')
-                axarr[1].set_title('reconstructed')
-                # for ax in axarr:
-                #     ax.set_xticks([])
-                #     ax.set_yticks([])
-                plt.suptitle(cl_name)
-                plt.savefig('results/vae_reconstruction_%s.png' % cl_name)
-                
-
-        vae.train()
+                    cl_name = classes[i]
+                    soc = samples_of_class.to(device)
+                    x_hat, x_mean, x_log_var = vae.forward(soc)
+                    xorig = soc[0].cpu().detach().numpy()
+                    xrec = x_hat[0].cpu().detach().numpy()
+                    axarr[0].imshow(xorig)
+                    axarr[1].imshow(xrec)
+                    
+                    axarr[0].set_title('original')
+                    axarr[1].set_title('reconstructed')
+                    # for ax in axarr:
+                    #     ax.set_xticks([])
+                    #     ax.set_yticks([])
+                    plt.suptitle(cl_name)
+                    plt.savefig('results/vae_reconstruction_%s.png' % cl_name)
+                    
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.patches as mpatches
 
-from transformer_train import load_model
+from transformer_train_torch import GesamTransformer
 from experiment_config import ds_folders, ds_buffer, ckpt_vae, ckpt_transformer, ckpt_discriminator
 
 import os
@@ -35,9 +35,11 @@ torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
 
+ckpt = 'results/transformer_cptv1.pt'
 
 
-model, checkpoint = load_model(ckpt_transformer)
+
+model = torch.load(ckpt)[0]
 config = model.config
 model.eval()
 
@@ -79,8 +81,13 @@ numeric_classes = np.array(numeric_classes, dtype=np.int32)
 
 def get_maes(ds):
     dl = DataLoader(ds, batch_size=batch_size, shuffle=False)
-    maes = np.zeros((0,6), dtype=np.float32)
-    mses = np.zeros((0,6), dtype=np.float32)
+
+    d_trans = np.zeros(shape=(0,150,128), dtype=np.float32)
+    d_vae = np.zeros(shape=(0,150,128), dtype=np.float32)
+    d_knn = np.zeros(shape=(0,150,128), dtype=np.float32)
+    cd_trans = np.zeros(shape=(0,5), dtype=np.float32)
+    cd_vae = np.zeros(shape=(0,5), dtype=np.float32)
+    cd_knn = np.zeros(shape=(0,5), dtype=np.float32)
 
     for d in dl:
         dx = d[0].to(device=device)
@@ -89,11 +96,10 @@ def get_maes(ds):
         condition_bottleneck = condition_model(dx,True)[0]
 
         # generate with transformer
-        gx = model.generate(num_generate=num_generate-1, condition=condition_bottleneck)
+        gx = model.generate(num_generate=num_generate, condition=condition_bottleneck)
 
         # generate with vae
-        vae_gx = condition_model.decoder(condition_bottleneck)
-        vae_gx = vae_gx.swapaxes(1,2)
+        vae_gx = condition_model.decode(condition_bottleneck)
 
         nn_gx = torch.zeros((dx.shape[0],150,128)).to(device)
 
@@ -107,102 +113,86 @@ def get_maes(ds):
             nn_gx[bi,:,:] = averagenn
 
         # plot with matplotlib all four images dx, gx vae_gx and nn_gx squared below each other
-        plt.figure(figsize=(10,15))
-        # remove all axes
-        plt.axis('off')
-        # remove all ticks
+        if False:
+            plt.figure(figsize=(10,15))
+            # remove all axes
+            plt.axis('off')
+            # remove all ticks
+            
+            plt.subplot(4,1,1)
+            plt.imshow(dx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+            plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+            plt.title('original')
+            
+            plt.subplot(4,1,2)
+            plt.imshow(gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+            plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+            plt.title('transformer generated')
+
+            plt.subplot(4,1,3)
+            plt.imshow(vae_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+            plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+            plt.title('VAE generated')        
+
+            plt.subplot(4,1,4)
+            plt.imshow(nn_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
+            plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+            plt.title('NN generated')
+            
+            plt.tight_layout()
+            plt.savefig('results/embedding_comparison.png')
         
-        plt.subplot(4,1,1)
-        plt.imshow(dx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
-        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
-        plt.title('original')
-        
-        plt.subplot(4,1,2)
-        plt.imshow(gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
-        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
-        plt.title('transformer generated')
-
-        plt.subplot(4,1,3)
-        plt.imshow(vae_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
-        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
-        plt.title('VAE generated')        
-
-        plt.subplot(4,1,4)
-        plt.imshow(nn_gx[0,:,:].cpu().detach().numpy().T, aspect='auto', origin='lower')
-        plt.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
-        plt.title('NN generated')
-        
-        plt.tight_layout()
-        plt.savefig('results/embedding_comparison.png')
-    
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-        # cropping because VAE has crop, to make a fair comparison
-        cropt = 150
-        
         dx_p = discriminator.forward(dx,True)
         gx_p = discriminator.forward(gx,True)
         vae_gx_p = discriminator.forward(vae_gx,True)
         nn_gx_p = discriminator.forward(nn_gx,True)   
 
+        d_trans = np.concatenate((d_trans, (dx-gx).cpu().detach().numpy()), axis=0)
+        d_vae = np.concatenate((d_vae, (dx-vae_gx).cpu().detach().numpy()), axis=0)
+        d_knn = np.concatenate((d_knn, (dx-nn_gx).cpu().detach().numpy()), axis=0)
+        cd_trans = np.concatenate((cd_trans, (dx_p-gx_p).cpu().detach().numpy()), axis=0)
+        cd_vae = np.concatenate((cd_vae, (dx_p-vae_gx_p).cpu().detach().numpy()), axis=0)
+        cd_knn = np.concatenate((cd_knn, (dx_p-nn_gx_p).cpu().detach().numpy()), axis=0)
 
-        mae_trans = torch.mean(torch.abs(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
-        mae_vae = torch.mean(torch.abs(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
-        mae_nn = torch.mean(torch.abs(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
-        mae_trans_cp = torch.mean(torch.abs(dx_p - gx_p)).item()
-        mae_vae_cp = torch.mean(torch.abs(dx_p - vae_gx_p)).item()
-        mae_nn_cp = torch.mean(torch.abs(dx_p - nn_gx_p)).item()
-        # concatenate to maes
-        maes = np.concatenate((maes, np.array([[mae_trans, mae_vae, mae_nn, mae_trans_cp, mae_vae_cp, mae_nn_cp]], dtype=np.float32)), axis=0)
-        
-        mse_trans = torch.mean(torch.square(dx[:,:cropt,:] - gx[:,:cropt,:])).item()
-        mse_vae = torch.mean(torch.square(dx[:,:cropt,:] - vae_gx[:,:cropt,:])).item()
-        mse_nn = torch.mean(torch.square(dx[:,:cropt,:] - nn_gx[:,:cropt,:])).item()
-        mse_trans_cp = torch.mean(torch.square(dx_p - gx_p)).item()
-        mse_vae_cp = torch.mean(torch.square(dx_p - vae_gx_p)).item()
-        mse_nn_cp = torch.mean(torch.square(dx_p - nn_gx_p)).item()
-        # concatenate to mses
-        mses = np.concatenate((mses, np.array([[mse_trans, mse_vae, mse_nn, mse_trans_cp, mse_vae_cp, mse_nn_cp]], dtype=np.float32)), axis=0)
-
-    return np.mean(maes, axis=0), np.mean(mses, axis=0)
+    return d_trans, d_vae, d_knn, cd_trans, cd_vae, cd_knn
 
 
-print('Calculating MAEs for train set (transformer, vae, nn)')
-maes_train, mses_train = get_maes(ds_train)
-print('Calculating MAEs for val set (transformer, vae, nn)')
-maes_val, mses_val = get_maes(ds_val)
+def mae(input):
+    return np.mean(np.abs(input))
 
-print(' & Transformer & VAE & NN \\\\')
+def mse(input):
+    return np.mean(np.square(input))
+
+
+
+def get_score(differences, metric, crop=None):
+    if crop is None:
+        crop = differences.shape[1]
+
+    return metric(differences[:,:crop])
+
+
+datasets = [ds_val, ds_train]
+dataset_names = ['test set', 'training set']
+
+
+print(' & Transformer & VAE-Dec & NN-Map \\\\')
 print('\\hline')
 print('\\hline')
-print('\\textbf{training set} & & & \\\\')
-print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[0], maes_train[1], maes_train[2]))
-print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_train[3], maes_train[4], maes_train[5]))
-print('\\hline')
-print('\\textbf{test set} & & & \\\\')
-print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[0], maes_val[1], maes_val[2]))
-print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (maes_val[3], maes_val[4], maes_val[5]))
-print('\hline')
-print('\hline')
 
-print(' & Transformer & VAE & NN \\\\')
-print('training set & & & \\')
-print('embedding MSE & %.4f & %.4f & %.4f \\\\' % (mses_train[0], mses_train[1], mses_train[2]))
-print('classifier MSE & %.4f & %.4f & %.4f \\\\' % (mses_train[3], mses_train[4], mses_train[5]))
-print('test set & & & \\')
-print('embedding MSE & %.4f & %.4f & %.4f \\\\' % (mses_val[0], mses_val[1], mses_val[2]))
-print('classifier MSE & %.4f & %.4f & %.4f \\\\' % (mses_val[3], mses_val[4], mses_val[5]))
+
+for ds,dsname in zip(datasets, dataset_names):
+    d_trans, d_vae, d_knn, cd_trans, cd_vae, cd_knn = get_maes(ds)
+    print('\\textbf{'+dsname+'} & & & \\\\')
+
+    print('embedding MAE & %.4f & %.4f & %.4f \\\\' % (get_score(d_trans, mae, None), get_score(d_vae, mae, None), get_score(d_knn, mae, None)))
+    print('embedding MAE50 & %.4f & %.4f & %.4f \\\\' % (get_score(d_trans, mae, 75), get_score(d_vae, mae, 75), get_score(d_knn, mae, 75)))
+    print('embedding MAE20 & %.4f & %.4f & %.4f \\\\' % (get_score(d_trans, mae, 30), get_score(d_vae, mae, 30), get_score(d_knn, mae, 30)))
+
+    print('classifier MAE & %.4f & %.4f & %.4f \\\\' % (get_score(cd_trans, mae, None), get_score(cd_vae, mae, None), get_score(cd_knn, mae, None)))
+    print('\hline')
+    print('\hline')
 
