@@ -78,6 +78,10 @@ class GesamTransformer(nn.Module):
 
     def forward(self, xdec, xenc):
         
+        xdec[:,0,:64] = xenc[:,0].unsqueeze(1).repeat(1,64)
+        xdec[:,0,64:] = xenc[:,1].unsqueeze(1).repeat(1,64)
+
+        
         xdec = self.input_projection_decoder(xdec)
         pos = torch.arange(0, xdec.shape[1], dtype=torch.long).to(self.device)
         pos_emb_dec = self.input_posemb_decoder(pos)
@@ -88,9 +92,15 @@ class GesamTransformer(nn.Module):
         pos_emb_enc = self.input_posemb_encoder(pos)
         xenc = xenc + pos_emb_enc
         
+
+        
+        
+        
         mask = self.get_tgt_mask(xdec.shape[1])
         ydec = self.transformer.forward(src=xenc,tgt=xdec,tgt_mask=mask)
         ydec = self.output_projection(ydec)
+        
+        
         
         return ydec
     

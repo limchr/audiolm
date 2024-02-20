@@ -39,7 +39,7 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 600
+num_passes = 2000
 batch_size = 1024
 lr = 6e-4 # learning rate
 wd = 0.05 # weight decay
@@ -91,7 +91,7 @@ vae = ConditionConvVAE(channels, linears, input_crop).to(device)
 optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)
 loss_fn = nn.MSELoss(reduction='sum')
 
-def loss_fn2(x, x_hat, mean, var, beta = 1.):
+def loss_fn2(x, x_hat, mean, var, iter):
     normalization = x.shape[0]*x.shape[1]*x.shape[2]
     reproduction_loss = None
     if False:
@@ -107,10 +107,71 @@ def loss_fn2(x, x_hat, mean, var, beta = 1.):
 
     # kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
     kl_loss = 0
+
+    # we want to have mean dist of about 0.5 (not working)
+    # kl_loss = 0.2* torch.abs(torch.linalg.vector_norm( mean, ord=2, dim=1).mean() - 0.5)
     
+    # occ_map = torch.zeros([10,10]).to(device)
+    # occ_map.requires_grad = True
+
+
+    # c2id = lambda xx: int(min( max(np.round(10*(xx/2+0.5)), 0), 9))
+
+
+
+    # for xx,yy in mean:
+    #     occ_map[c2id(xx.item()), c2id(yy.item())] += 1
+
+    # kl_loss += torch.max(occ_map) * 0.1
+    min_dist = 2 / math.sqrt(batch_size)
+
+
+    # cd = torch.cdist(mean,mean, compute_mode='use_mm_for_euclid_dist') + torch.eye(x.shape[0]).to(device) * 100
+    # cdmin = cd.min(axis=0)[0]
+    # zerotensor = torch.FloatTensor([0.0]).to(device).expand_as(cdmin)
+    # lv = torch.max(min_dist-cdmin, zerotensor)
+    # kl_loss += lv.mean() * 10.
+
+
+
+
+    eps = 1e-2
+    # Calculate pairwise squared distances between points in the latent space
+    dists = torch.cdist(mean,mean, p=2)
+    
+
+    dist_mask = dists < min_dist
+
+    # Apply threshold to consider only distances below the threshold
+    dists = torch.where(dists < min_dist, dists, torch.ones_like(dists)*1000)
+    
+    # Invert distances to create repulsion effect, adding eps for numerical stability
+    repulsion_effect = 1.0 / (dists + eps)
+    
+    # Mask out the diagonal (self-distances) to avoid self-repulsion
+    mask = torch.eye(dists.size(0), device=device).bool()
+    repulsion_effect = repulsion_effect.masked_fill_(mask, 0)
+    
+    # Calculate the mean repulsion effect, ignoring the zeros from masked distances
+    
+    kl_loss += 0.1 * repulsion_effect.sum() / (repulsion_effect > 0.01).sum()
+
+
+
+
+
+
+
+
     l = torch.linalg.vector_norm(mean,ord=2,dim=1)
     scalar = torch.FloatTensor([0.0]).to(device)
-    kl_loss += torch.max((l-1.0),scalar.expand_as(l)).mean() * 0.1
+    kl_loss += torch.max((l-1.0),scalar.expand_as(l)).mean() * 5.0
+    
+    
+    
+    multp = 0.01 if iter > num_passes/4 else 0.0001
+
+    kl_loss *= multp
     # kl_loss += torch.mean(torch.abs(l-0.8)) * 0.001
     # loss = (l*0.35)**32
 
@@ -126,7 +187,7 @@ def det_loss(va,ds):
     for dx, _, _, _ in dl:
         dx = dx.to(device)
         x_hat, mean, var = va.forward(dx)
-        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
+        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var,1)
         losses.append([rec_loss.item(), kld_loss.item()])
     losses = np.array(losses).mean(axis=0)
     return losses
@@ -150,12 +211,12 @@ for i in range(num_passes):
         optimizer.zero_grad(set_to_none=True)
         dx = dx.to(device)
         x_hat, mean, var = vae.forward(dx)
-        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var)
+        rec_loss, kld_loss = loss_fn2(dx, x_hat, mean, var, i)
         loss = rec_loss + kld_loss
         loss.backward()
         optimizer.step()
 
-    if i == int(num_passes * 0.8) or i == int(num_passes * 0.9):
+    if i == int(num_passes * 0.7) or i == int(num_passes * 0.8) or i == int(num_passes * 0.9):
         # change learning rate
         lr = lr * 0.1
         optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=betas)

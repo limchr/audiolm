@@ -35,7 +35,7 @@ torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
 
-ckpt = 'results/transformer_cptv1.pt'
+ckpt = ckpt_transformer
 
 
 

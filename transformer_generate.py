@@ -24,16 +24,19 @@ import os
 import shutil
 
 outdir = 'results/samples'
-ckpt = 'results/transformer_cptv1.pt'
+ckpt = ckpt_transformer
 
 device = 'cuda'
 seed = 1234
-ns = 80 # number of samples for x and y (total samples = ns*ns)
+
+from experiment_config import ns
+
+
 num_generate = 150
 num_sample_points_export = 5000
 
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
-visualization_area = [-0.8, 1, -0.8, 0.8]
+visualization_area = [-0.8, 0.8, -0.8, 0.8]
 visualization_to_model_space = lambda va,x,y: [ (va[1]-va[0]) * (x+1)/2 + va[0], (va[3]-va[2]) * (y+1)/2 + va[2] ]
 model_to_visualization_space = lambda va,x,y: [ (x-va[0])/(va[1]-va[0]) * 2 - 1, (y-va[2])/(va[3]-va[2]) * 2 - 1 ]
 sampling_x = np.linspace(visualization_area[0],visualization_area[1],ns)
@@ -162,80 +165,10 @@ for xi,x in enumerate(sampling_x):
     generated_map.append(generated)
 
 
-classes = ds_train.ds.classes
 
 import pickle as pkl
 with open('results/map_data.pkl', 'wb') as f:
     pkl.dump(generated_map, f)
-
-
-plt.close()
-# Define the figure and subplot grid
-fig, axs = plt.subplots(2, 3, figsize=(10, 10))
-
-model_labels = ['Transformer', 'VAE-Dec', 'kNN-Map']
-models = ['transformer', 'vae', 'nn']
-
-
-# Loop through each subplot
-for i in range(3): # models
-    for j in range(2): # 0 for predicted classes, 1 for margin
-        # Create an image for the subplot
-        img = np.zeros((ns, ns), dtype=np.int32 if j == 0 else np.float32)
-        for xx in range(ns):
-            for yy in range(ns):
-                img[xx, yy] = generated_map[xx][yy]['classifications'][models[i]][j]
-
-
-        if j==1:
-            # Plot the image on the current subplot
-            im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays')
-        if j==0:
-            im = axs[j, i].imshow(img, interpolation='none', cmap="tab10")
-
-            # Get the colors of the values, according to the colormap used by imshow
-            colors = [im.cmap(im.norm(value)) for value in range(len(classes))]
-
-            # Create a patch (proxy artist) for every color
-            patches = [matplotlib.patches.Patch(color=colors[k], label=classes[k]) for k in range(len(classes))]
-
-            # Put those patched as legend-handles into the legend
-            # axs[j, i].legend(handles=patches, borderaxespad=0., loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=len(classes)//2)
-
-            axs.flat[i].set_title(model_labels[i])
-
-
-
-
-        axs[j, i].grid(True, which='both', axis='both', linestyle='--', color='k', linewidth=0.1)
-        axs[j, i].set_xticks(np.arange(0, ns, 1) + 0.5)
-        axs[j, i].set_yticks(np.arange(0, ns, 1) + 0.5)
-        axs[j, i].tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False,
-                              labelbottom=False, labelleft=False)
-
-# Create a single legend outside of the subplots
-plt.legend(handles=patches, loc='lower center', bbox_to_anchor=(-0.5, 1.0), ncol=len(classes))
-plt.gcf().set_size_inches(20, 10)
-
-
-# Show the plot
-plt.tight_layout()
-plt.savefig('results/classification_map.png')
-# plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
- 
-
 
 
 # 
