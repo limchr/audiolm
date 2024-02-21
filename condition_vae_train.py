@@ -39,7 +39,7 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 2000
+num_passes = 5000
 batch_size = 1024
 lr = 6e-4 # learning rate
 wd = 0.05 # weight decay
@@ -92,6 +92,11 @@ optimizer = torch.optim.AdamW(vae.parameters(), lr=lr, weight_decay=wd, betas=be
 loss_fn = nn.MSELoss(reduction='sum')
 
 def loss_fn2(x, x_hat, mean, var, iter):
+    
+    b, t, f = x.shape
+    
+    
+    
     normalization = x.shape[0]*x.shape[1]*x.shape[2]
     reproduction_loss = None
     if False:
@@ -263,7 +268,7 @@ for i in range(num_passes):
 
         classes = ds_train.ds.classes
         for i in range(len(classes)):
-            samples_of_class = dsx[dsy==i][:batch_size]
+            samples_of_class = dsx[dsy==i][:batch_size*2]
             if len(samples_of_class) > 0:
                 outp_mean, outp_var  = vae.forward(samples_of_class.to(device),encoder_only=True)    
                 px = outp_mean.cpu().detach().numpy()
