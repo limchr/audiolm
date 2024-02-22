@@ -20,7 +20,7 @@ from_scratch = True # train model from scratch, otherwise load from checkpoint
 ds_from_scratch = False # create data set dump from scratch (set True if data set or pre processing has changed)
 only_labeled_samples=True
 
-num_passes = 300 # num passes through the dataset
+num_passes = 500 # num passes through the dataset
 
 learning_rate = 9e-5 # max learning rate
 weight_decay = 0.05

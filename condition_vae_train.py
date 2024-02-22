@@ -2,6 +2,7 @@
 # export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # for enabling deterministic behaviour of this script
 #
+# python3 condition_vae_train.py; python3 transformer_train_torch.py ; python3 transformer_generate.py ; python3 evaluation_table.py
 
 from dataclasses import dataclass
 
@@ -29,7 +30,7 @@ import gc
 
 
 # we want absolute deterministic behaviour here for reproducibility a good looking 2d embedding
-seed = 1238
+seed = 123132
 data_seed = 1234
 
 torch.manual_seed(seed)
@@ -39,11 +40,13 @@ torch.use_deterministic_algorithms(True)
 
 device = 'cuda'
 
-num_passes = 5000
+num_passes = 10000
 batch_size = 1024
 lr = 6e-4 # learning rate
 wd = 0.05 # weight decay
 betas = (0.9, 0.95) # adam betas
+
+weighted_reproduction = True
 
 # crop the time dimension to this length (150 -> input_crop)
 input_crop = 150
@@ -95,95 +98,56 @@ def loss_fn2(x, x_hat, mean, var, iter):
     
     b, t, f = x.shape
     
-    
-    
-    normalization = x.shape[0]*x.shape[1]*x.shape[2]
+    #
+    # reproduction loss
+    #
     reproduction_loss = None
-    if False:
+    rep_norm = b*t*f
+    if weighted_reproduction:
         # weighting function for increasing the weight of the beginning of the sample
         # idea would be envolope loss (adsr)
         weight = torch.zeros_like(x)
         for i in range(x.shape[1]):
             weight[:,i,:] = 1-(i/x.shape[1])**2
         weight = 1/weight.mean() * weight
-        reproduction_loss = loss_fn(x_hat*weight, x*weight) / normalization
+        reproduction_loss = loss_fn(x_hat*weight, x*weight) / rep_norm
     else:
-        reproduction_loss = loss_fn(x_hat, x) / normalization
+        reproduction_loss = loss_fn(x_hat, x) / rep_norm
 
-    # kl_loss = ( beta * -0.5 * torch.sum(1 + var - mean**2 - var.exp()) ) / normalization
-    kl_loss = 0
-
-    # we want to have mean dist of about 0.5 (not working)
-    # kl_loss = 0.2* torch.abs(torch.linalg.vector_norm( mean, ord=2, dim=1).mean() - 0.5)
+    #
+    # regularization loss terms
+    #
     
-    # occ_map = torch.zeros([10,10]).to(device)
-    # occ_map.requires_grad = True
-
-
-    # c2id = lambda xx: int(min( max(np.round(10*(xx/2+0.5)), 0), 9))
-
-
-
-    # for xx,yy in mean:
-    #     occ_map[c2id(xx.item()), c2id(yy.item())] += 1
-
-    # kl_loss += torch.max(occ_map) * 0.1
-    min_dist = 2 / math.sqrt(batch_size)
-
-
-    # cd = torch.cdist(mean,mean, compute_mode='use_mm_for_euclid_dist') + torch.eye(x.shape[0]).to(device) * 100
-    # cdmin = cd.min(axis=0)[0]
-    # zerotensor = torch.FloatTensor([0.0]).to(device).expand_as(cdmin)
-    # lv = torch.max(min_dist-cdmin, zerotensor)
-    # kl_loss += lv.mean() * 10.
-
-
-
-
-    eps = 1e-2
-    # Calculate pairwise squared distances between points in the latent space
+    # neighboring loss
+    min_dist = 2 / math.sqrt(batch_size) # distance between samples that is desired
+    eps = 1e-3
+    
     dists = torch.cdist(mean,mean, p=2)
-    
-
-    dist_mask = dists < min_dist
-
-    # Apply threshold to consider only distances below the threshold
-    dists = torch.where(dists < min_dist, dists, torch.ones_like(dists)*1000)
-    
-    # Invert distances to create repulsion effect, adding eps for numerical stability
+    dists = torch.where(dists < min_dist, dists, torch.ones_like(dists)*1000000)
     repulsion_effect = 1.0 / (dists + eps)
     
-    # Mask out the diagonal (self-distances) to avoid self-repulsion
     mask = torch.eye(dists.size(0), device=device).bool()
     repulsion_effect = repulsion_effect.masked_fill_(mask, 0)
+    neighbor_loss = repulsion_effect.sum() / (b * (1/eps))
+
+
+    # spatial regularization loss
+    l_orig = torch.linalg.vector_norm(mean,ord=2,dim=1)
+    zero_tensor = torch.FloatTensor([0.0]).to(device)
+    spatial_loss = torch.max((l_orig-1.0),zero_tensor.expand_as(l_orig)).mean()
     
-    # Calculate the mean repulsion effect, ignoring the zeros from masked distances
+    # # debug print outs
+    # print('###')
+    # print(reproduction_loss)
+    # print(neighbor_loss)
+    # print(spatial_loss)
+    # print('')
     
-    kl_loss += 0.1 * repulsion_effect.sum() / (repulsion_effect > 0.01).sum()
+    warmup_ratio = 0.1
+    training_progress = (iter/num_passes)
+    reg_beta = 0.0 if training_progress < warmup_ratio else training_progress   
 
-
-
-
-
-
-
-
-    l = torch.linalg.vector_norm(mean,ord=2,dim=1)
-    scalar = torch.FloatTensor([0.0]).to(device)
-    kl_loss += torch.max((l-1.0),scalar.expand_as(l)).mean() * 5.0
-    
-    
-    
-    multp = 0.01 if iter > num_passes/4 else 0.0001
-
-    kl_loss *= multp
-    # kl_loss += torch.mean(torch.abs(l-0.8)) * 0.001
-    # loss = (l*0.35)**32
-
-    li = reproduction_loss.item()
-    if li > 100:
-        print('#################### %f' % li)
-    return reproduction_loss, kl_loss
+    return reproduction_loss, reg_beta * (0.5 * neighbor_loss + spatial_loss)
 
 
 def det_loss(va,ds):
@@ -231,7 +195,7 @@ for i in range(num_passes):
         print_param_stats(vae)
 
 
-    if i % 10 == 0:
+    if i>0 and i % 10 == 0:
 
         vae.eval()
         
