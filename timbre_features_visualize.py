@@ -54,7 +54,7 @@ def plot_feature_heatmap(features_list, feature_name, xlabel='', ylabel='', titl
     # Populate the grid with the specified feature
     for x, y, features in features_list:
         if feature_name in features:
-            feature_grid[x, y] = features[feature_name]
+            feature_grid[x, y] = np.log(features[feature_name])
 
     # Create edges for pcolormesh
     x_edges = np.arange(grid_size_x + 1) - 0.5

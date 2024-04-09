@@ -36,7 +36,7 @@ num_generate = 150
 num_sample_points_export = 5000
 
 # visualization_area = [-0.8, 0.5, -0.6, 0.4] # area to be sampled (where training data is within the embedding space xmin, xmax, ymin, ymax)
-visualization_area = [-0.9, 0.9, -0.9, 0.9]
+visualization_area = [-1, 1, -1, 1]
 visualization_to_model_space = lambda va,x,y: [ (va[1]-va[0]) * (x+1)/2 + va[0], (va[3]-va[2]) * (y+1)/2 + va[2] ]
 model_to_visualization_space = lambda va,x,y: [ (x-va[0])/(va[1]-va[0]) * 2 - 1, (y-va[2])/(va[3]-va[2]) * 2 - 1 ]
 sampling_x = np.linspace(visualization_area[0],visualization_area[1],ns)
@@ -148,7 +148,8 @@ for xi,x in enumerate(sampling_x):
         p_nn = classify(nn_gx)
         print(p_transformer)
 
-        generated.append({'transformer': gx, 'vae': vae_gx, 'nn': nn_gx, 'classifications': {'transformer': p_transformer, 'vae': p_vae, 'nn': p_nn}})
+        # generated.append({'transformer': gx.cpu().detach().numpy(), 'vae': vae_gx.cpu().detach().numpy(), 'nn': nn_gx.cpu().detach().numpy(), 'classifications': {'transformer': p_transformer, 'vae': p_vae, 'nn': p_nn}})
+        generated.append({'transformer': None, 'vae': None, 'nn': None, 'classifications': {'transformer': p_transformer, 'vae': p_vae, 'nn': p_nn}})
 
         print('generated %d/%d' % (xi*ns+yi, ns*ns))
         if True:

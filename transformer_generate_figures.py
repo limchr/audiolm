@@ -65,6 +65,27 @@ fig, axs = plt.subplots(2, 3, figsize=(10, 10))
 model_labels = ['Transformer', 'VAE-Dec', 'kNN-Map']
 models = ['transformer', 'vae', 'nn']
 
+cols = np.array([
+			[255, 102, 102],  
+			[255, 204, 102], 
+			[255, 255, 102], 
+			[102, 255, 102], 
+			[102, 204, 255],
+			[204, 102, 255], 
+			[255, 153, 255], 
+			[153, 153, 153] 
+
+
+
+]) / 255.
+
+from matplotlib import colors
+
+cmap = colors.ListedColormap(cols)
+bounds=list(range(len(cols)))
+norm = colors.BoundaryNorm(bounds, cmap.N)
+
+
 
 # Loop through each subplot
 for i in range(3): # models
@@ -73,14 +94,14 @@ for i in range(3): # models
         img = np.zeros((ns, ns), dtype=np.int32 if j == 0 else np.float32)
         for xx in range(ns):
             for yy in range(ns):
-                img[xx, yy] = generated_map[xx][yy]['classifications'][models[i]][j]
+                img[ns-yy-1, xx] = generated_map[xx][yy]['classifications'][models[i]][j]
 
 
         if j==1:
             # Plot the image on the current subplot
             im = axs[j, i].imshow(img, interpolation='none', vmin=0, vmax=1.0, cmap='Grays')
         if j==0:
-            im = axs[j, i].imshow(img, interpolation='none', cmap="tab10")
+            im = axs[j, i].imshow(img, interpolation='none', cmap=cmap, norm=norm)
 
             # Get the colors of the values, according to the colormap used by imshow
             colors = [im.cmap(im.norm(value)) for value in range(len(classes))]
@@ -112,4 +133,20 @@ plt.tight_layout()
 plt.savefig('results/classification_map.png')
 # plt.show()
 
+
+
+cols = cols * 255
+
+img = np.zeros((ns, ns, 3), dtype=np.uint8)
+for xx in range(ns):
+    for yy in range(ns):
+        ci = generated_map[xx][yy]['classifications'][models[0]][0]
+        img[ns-yy-1, xx] = cols[ci]
+
+
+
+
+from PIL import Image
+im = Image.fromarray(img)
+im.save("results/map.png")
 

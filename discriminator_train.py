@@ -25,9 +25,9 @@ from audiolm_pytorch.discriminator import Discriminator
 
 
 device = 'cuda'
-num_passes = 100 # num passes through the dataset
+num_passes = 200 # num passes through the dataset
 
-learning_rate = 3e-4 # max learning rate
+learning_rate = 1e-4 # max learning rate
 weight_decay = 0.05
 beta1 = 0.9
 beta2 = 0.95
@@ -38,7 +38,7 @@ loss_fn = F.binary_cross_entropy
 input_crop = 150
 channels = [128,256,512,256]
 linears = [256, 128, 64, 5]
-dropout = 0.15
+dropout = 0.45
 
 seed = 1234
 

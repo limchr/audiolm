@@ -108,6 +108,11 @@ class GesamTransformer(nn.Module):
             dx = dx.to(device).detach()
             dy = dy.to(device).detach()
             cx = cmodel(dx,True)[0].detach()
+            rnds = torch.randn_like(cx).to(device) * 0.05
+            cx = cx+rnds
+
+
+
             logits = self.forward(xdec=dx,xenc=cx)
             loss = F.mse_loss(logits,dy)
             return logits, loss
