@@ -54,7 +54,17 @@ def plot_feature_heatmap(features_list, feature_name, xlabel='', ylabel='', titl
     # Populate the grid with the specified feature
     for x, y, features in features_list:
         if feature_name in features:
-            feature_grid[x, y] = np.log(features[feature_name])
+            feature_grid[x, y] = np.log(0.1+features[feature_name])
+
+    # normalizing log between 0 and 1
+    feature_grid = (-feature_grid.min()+feature_grid)/(feature_grid.max()-feature_grid.min())
+
+    from PIL import Image
+    
+    cm = plt.get_cmap('rainbow')
+    colored_image = cm(feature_grid)
+
+    Image.fromarray((colored_image[:, :, :3] * 255).astype(np.uint8)).save('results/feature_im_%s.png' % feature_name)
 
     # Create edges for pcolormesh
     x_edges = np.arange(grid_size_x + 1) - 0.5
@@ -75,7 +85,7 @@ def plot_feature_heatmap(features_list, feature_name, xlabel='', ylabel='', titl
     plt.savefig('results/features_heatmap_%s.png' % feature_name)
     plt.show()
 
-feature_names = ['energy', 'spectral_centroid', 'spectral_bandwidth', 'spectral_flatness', 'spectral_rolloff', 'zero_crossing_rate']
+feature_names = ['energy', 'spectral_centroid', 'spectral_bandwidth', 'spectral_flatness', 'spectral_rolloff', 'zero_crossing_rate', 'tsne']
 
 for feature_name in feature_names:
     plot_feature_heatmap(features_list, feature_name)
