@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pickle
 
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import MinMaxScaler
 
 def compute_timbre_features(file_path):
     # Load audio file
@@ -63,22 +65,6 @@ for file in os.listdir(folder_path):
         # Append features with indices for plotting
         features_list.append((x, y, features))
 
-# At this point, `features_list` contains all the computed features along with indices
-
-# Assuming `features_list` is your list of features
-features_file = 'features_list.pkl'
-
-features_vec = [list(x[2].values()) for x in features_list]
-# features_vec = [list(x[:2]) + list(x[2].values()) for x in features_list]
-features_vec = np.array(features_vec)
-
-from sklearn.manifold import TSNE
-from sklearn.preprocessing import MinMaxScaler
-
-X_embedded = TSNE(n_components=1, learning_rate='auto', init='random', perplexity=3).fit_transform(features_vec)
-
-for i in range(len(features_list)):
-    features_list[i][2]['tsne'] = X_embedded[i]
 
 
 feature_names = list(features_list[0][2].keys())
@@ -109,7 +95,7 @@ for fn in feature_names:
     plt.show()
     plt.close()
     
-    clip_percentile = 5
+    clip_percentile = 2
     lower_bound = np.percentile(feats, clip_percentile)
     upper_bound = np.percentile(feats, 100 - clip_percentile)
 
@@ -147,7 +133,24 @@ for fn in feature_names:
     plt.close()
     
 
+features_vec = [list(x[2].values()) for x in features_list]
+# features_vec = [list(x[:2]) + list(x[2].values()) for x in features_list]
+features_vec = np.array(features_vec)
 
+
+X_embedded = TSNE(n_components=3, learning_rate='auto', init='random').fit_transform(features_vec)
+
+scaler = MinMaxScaler()
+Xen = scaler.fit_transform(X_embedded)
+
+
+for i in range(len(features_list)):
+    features_list[i][2]['tsne'] = Xen[i]
+
+
+
+
+features_file = 'features_list.pkl'
 
 # Save the features_list to a file
 with open(features_file, 'wb') as file:
